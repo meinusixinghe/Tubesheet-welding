@@ -40,7 +40,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent)
     QVBoxLayout *camLayout = new QVBoxLayout(camGroup);
 
     QHBoxLayout *camTopLayout = new QHBoxLayout();
-    m_searchCamBtn = new QPushButton("🔍 搜索局域网相机", this);
+    m_searchCamBtn = new QPushButton("搜索局域网相机", this);
     m_cameraCombo = new QComboBox(this);
     m_cameraCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     camTopLayout->addWidget(m_searchCamBtn);
@@ -48,7 +48,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent)
     camLayout->addLayout(camTopLayout);
 
     QHBoxLayout *camBottomLayout = new QHBoxLayout();
-    m_connectCamBtn = new QPushButton("🔗 连接选中相机", this);
+    m_connectCamBtn = new QPushButton("连接选中相机", this);
     m_camStatusLabel = new QLabel("相机状态: 等待搜索...", this);
     m_camStatusLabel->setStyleSheet("color: #757575; font-weight: bold;"); // 灰色
     camBottomLayout->addWidget(m_connectCamBtn);
@@ -100,9 +100,6 @@ void ConnectionDialog::onConnectRobotClicked()
     accept();
 }
 
-// =========================================================
-// 🌟 核心：执行官方 SDK 3.1.1 -> 3.1.3 -> 3.1.4 搜索流程
-// =========================================================
 void ConnectionDialog::onSearchCameraClicked()
 {
     m_camStatusLabel->setText("状态: 正在初始化与深度搜索...");
@@ -210,11 +207,11 @@ void ConnectionDialog::onConnectCameraClicked()
 
     if (handle != nullptr) {
         m_hCamera = handle;
-        m_camStatusLabel->setText("状态: ✅ 相机句柄获取成功！");
+        m_camStatusLabel->setText("状态: 相机句柄获取成功！");
         m_camStatusLabel->setStyleSheet("color: #388E3C; font-weight: bold;");
         m_connectCamBtn->setEnabled(false);
     } else {
-        m_camStatusLabel->setText("状态: ❌ 连接拒绝或失败");
+        m_camStatusLabel->setText("状态: 连接拒绝或失败");
         m_camStatusLabel->setStyleSheet("color: #D32F2F; font-weight: bold;");
         QMessageBox::critical(this, "设备异常", QString("所选相机打开失败！\n错误码：%1").arg(errCode));
     }
