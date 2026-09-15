@@ -1303,51 +1303,69 @@ void MainWindow::onCaptureTriggered()
 
     if (!m_isCapturing) {
         // ==========================================
-        // 🌟 按照官方 Demo 顺序开启激光扫描流
+        // 🌟 开启 3D 扫描流程
         // ==========================================
-        if (VzNL_BeginDetectLaser(m_mainCameraHandle) != 0) {
-            qDebug() << "创建检测激光线工具失败";
+        // 1. 启用 RGB Sensor 与摆动电机 (严格参考官方)
+        VzNL_EnableRGB(m_mainCameraHandle, VzTrue);
+        VzNL_EnableSwingMotor(m_mainCameraHandle, VzTrue);
+
+        // 2. 创建激光线检测工具
+        int nErr = VzNL_BeginDetectLaser(m_mainCameraHandle);
+        if (nErr != 0) {
+            QMessageBox::critical(this, "错误", QString("创建检测激光线工具失败，错误码：%1").arg(nErr));
             return;
         }
 
+        // 3. 设置主模式
         VzNL_SetTriggerMode(m_mainCameraHandle, keEyeTriggerMode_Master);
 
-        // 开启自动检测流
-        int ret = VzNL_StartAutoDetectEx(m_mainCameraHandle, keResultDataType_PointXYZRGBA, keFlipType_None, _AutoOutputLaserLineExCB, this);
-        if (ret == 0) {
+        // 4. 开始流模式检测 (使用 3D 专属 API)
+        nErr = VzNL_StartAutoDetectEx(m_mainCameraHandle, keResultDataType_PointXYZRGBA, keFlipType_None, _AutoOutputLaserLineExCB, this);
+
+        if (nErr == 0) {
             m_isCapturing = true;
-            m_captureAction->setText("⏹ 停止并保存图片");
+            m_captureAction->setText("⏹ 停止扫描并保存图像");
+            qDebug() << "▶ 激光扫描已启动，请等待扫描完成后点击停止...";
         } else {
-            QMessageBox::critical(this, "错误", "开流失败");
+            QMessageBox::critical(this, "错误", QString("开流失败，错误码：%1").arg(nErr));
+            VzNL_EndDetectLaser(m_mainCameraHandle);
         }
 
     } else {
         // ==========================================
-        // 🌟 按照官方 Demo 顺序断流并抓取表面图
+        // 🌟 停止扫描并提取 2D 表面图
         // ==========================================
         VzNL_StopAutoDetect(m_mainCameraHandle);
         m_isCapturing = false;
         m_captureAction->setText("▶ 开启采图");
 
-        // 提取自动合成的 2D 表面图像
+        // 1. 提取自动合成的表面图像
         SVzNLImageData* psCenterImage = nullptr;
         VzNL_GetAutoDetectResultSurface(m_mainCameraHandle, &psCenterImage);
 
-        if (psCenterImage) {
+        if (psCenterImage != nullptr) {
+            // 2. 构建保存路径
             QString saveDir = QCoreApplication::applicationDirPath() + "/CaptureImages";
             QDir().mkpath(saveDir);
-            QString fileName = saveDir + QString("/Gray_%1.png").arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
+            QString fileName = saveDir + QString("/Surface_%1.png").arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
 
-            // 保存提取的图像
+            // 3. 保存图像
             if (VzNL_SaveImage(fileName.toUtf8().data(), psCenterImage) == 0) {
-                QMessageBox::information(this, "存图成功", "表面图像已保存至:\n" + fileName);
+                qDebug() << "📸 表面图像已成功保存至：" << fileName;
+                QMessageBox::information(this, "采图成功", "表面图像已保存至:\n" + fileName);
+            } else {
+                qDebug() << "❌ 图像保存失败！";
             }
 
-            // ⚠️ 极其重要：官方 Demo 要求必须手动释放内存
+            // 4. 释放内存 (必须执行，否则内存泄漏)
             VzNL_ReleaseImage(&psCenterImage);
+        } else {
+            QMessageBox::warning(this, "提示", "未能提取到有效的表面图像，请检查扫描过程是否完整。");
         }
 
+        // 5. 结束激光检测工具
         VzNL_EndDetectLaser(m_mainCameraHandle);
+        qDebug() << "⏹ 激光扫描已安全结束。";
     }
 }
 
