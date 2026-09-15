@@ -26,12 +26,6 @@
 #include <QInputDialog>
 #include <QSettings>
 #include <QCloseEvent>
-#include "VZNL_Graphics.h"
-#include "VZNL_DetectLaser.h"
-#include "VZNL_DetectConfig.h"
-#include "VZNL_EyeConfig.h"
-#include "VZNL_RGBConfig.h"
-#include "VZNL_SwingMotor.h"
 
 MainWindow::MainWindow(QWidget *parent): QMainWindow(parent)
 {
@@ -310,35 +304,15 @@ void MainWindow::setupUi()
     spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     toolBar->addWidget(spacer);
 
-    // 2. 创建相机相关的 Action 按钮 (假设 m_captureAction 已在头文件中声明)
-    QAction *m_openDeviceAction = new QAction("打开设备", this);
-    m_captureAction = new QAction("▶ 开启采图", this);
-    QAction *m_closeDeviceAction = new QAction("关闭设备", this);
+    m_camera=new VizumCamera(this);
+    m_camera->addActionsToToolBar(toolBar);
 
-    // 初始状态下禁用采图和关闭按钮（根据你的实际业务逻辑可选）
-    m_captureAction->setEnabled(false);
-    m_closeDeviceAction->setEnabled(false);
 
-    // 3. 将按钮依次添加到工具栏最右侧
-    toolBar->addAction(m_openDeviceAction);
-    toolBar->addAction(m_captureAction);
-    toolBar->addAction(m_closeDeviceAction);
-
-    // 4. 绑定相机控制相关的槽函数
-    connect(m_openDeviceAction, &QAction::triggered, this, &MainWindow::onOpenDeviceTriggered);
-    connect(m_captureAction, &QAction::triggered, this, &MainWindow::onCaptureTriggered);
-    connect(m_closeDeviceAction, &QAction::triggered, this, &MainWindow::onCloseDeviceTriggered);
-    // ==========================================================
-
-    // 7. 初始化坐标管理器
+    // 初始化坐标管理器
     m_coordManager = new usercoordinatemanager(this);
     m_coordManager->initialize(renderArea, dataTable, weldHoles, mainPlateHole, m_statusLabel);
 
-    // 7. 初始化坐标管理器
-    m_coordManager = new usercoordinatemanager(this);
-    m_coordManager->initialize(renderArea, dataTable, weldHoles, mainPlateHole, m_statusLabel);
-
-    // 8. 信号槽连接
+    // 信号槽连接
     connect(loadAction, &QAction::triggered, this, &MainWindow::importDxf);                 // 导入DXF → 触发importDxf函数
     connect(dataTable->selectionModel(), &QItemSelectionModel::currentRowChanged,
             this, &MainWindow::handleTableSelectionChanged);                                // 表格选中行变化 → 处理选中逻辑
@@ -1294,167 +1268,3 @@ void MainWindow::sendNextWeldHole()
 }
 
 
-void MainWindow::onCaptureTriggered()
-{
-    if (m_mainCameraHandle == nullptr) {
-        QMessageBox::warning(this, "警告", "请先打开设备！");
-        return;
-    }
-
-    if (!m_isCapturing) {
-        // ==========================================
-        // 🌟 开启 3D 扫描流程
-        // ==========================================
-        // 1. 启用 RGB Sensor 与摆动电机 (严格参考官方)
-        VzNL_EnableRGB(m_mainCameraHandle, VzTrue);
-        VzNL_EnableSwingMotor(m_mainCameraHandle, VzTrue);
-
-        // 2. 创建激光线检测工具
-        int nErr = VzNL_BeginDetectLaser(m_mainCameraHandle);
-        if (nErr != 0) {
-            QMessageBox::critical(this, "错误", QString("创建检测激光线工具失败，错误码：%1").arg(nErr));
-            return;
-        }
-
-        // 3. 设置主模式
-        VzNL_SetTriggerMode(m_mainCameraHandle, keEyeTriggerMode_Master);
-
-        // 4. 开始流模式检测 (使用 3D 专属 API)
-        nErr = VzNL_StartAutoDetectEx(m_mainCameraHandle, keResultDataType_PointXYZRGBA, keFlipType_None, _AutoOutputLaserLineExCB, this);
-
-        if (nErr == 0) {
-            m_isCapturing = true;
-            m_captureAction->setText("⏹ 停止扫描并保存图像");
-            qDebug() << "▶ 激光扫描已启动，请等待扫描完成后点击停止...";
-        } else {
-            QMessageBox::critical(this, "错误", QString("开流失败，错误码：%1").arg(nErr));
-            VzNL_EndDetectLaser(m_mainCameraHandle);
-        }
-
-    } else {
-        // ==========================================
-        // 🌟 停止扫描并提取 2D 表面图
-        // ==========================================
-        VzNL_StopAutoDetect(m_mainCameraHandle);
-        m_isCapturing = false;
-        m_captureAction->setText("▶ 开启采图");
-
-        // 1. 提取自动合成的表面图像
-        SVzNLImageData* psCenterImage = nullptr;
-        VzNL_GetAutoDetectResultSurface(m_mainCameraHandle, &psCenterImage);
-
-        if (psCenterImage != nullptr) {
-            // 2. 构建保存路径
-            QString saveDir = QCoreApplication::applicationDirPath() + "/CaptureImages";
-            QDir().mkpath(saveDir);
-            QString fileName = saveDir + QString("/Surface_%1.png").arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
-
-            // 3. 保存图像
-            if (VzNL_SaveImage(fileName.toUtf8().data(), psCenterImage) == 0) {
-                qDebug() << "📸 表面图像已成功保存至：" << fileName;
-                QMessageBox::information(this, "采图成功", "表面图像已保存至:\n" + fileName);
-            } else {
-                qDebug() << "❌ 图像保存失败！";
-            }
-
-            // 4. 释放内存 (必须执行，否则内存泄漏)
-            VzNL_ReleaseImage(&psCenterImage);
-        } else {
-            QMessageBox::warning(this, "提示", "未能提取到有效的表面图像，请检查扫描过程是否完整。");
-        }
-
-        // 5. 结束激光检测工具
-        VzNL_EndDetectLaser(m_mainCameraHandle);
-        qDebug() << "⏹ 激光扫描已安全结束。";
-    }
-}
-
-void MainWindow::onOpenDeviceTriggered()
-{
-    if (m_mainCameraHandle != nullptr) {
-        QMessageBox::information(this, "提示", "设备已经处于打开状态。");
-        return;
-    }
-
-    // 1. 初始化 SDK (官方推荐带超时参数)
-    SVzNLConfigParam configParam;
-    memset(&configParam, 0, sizeof(SVzNLConfigParam));
-    configParam.nDeviceTimeOut = 0;
-    if (VzNL_Init(&configParam) != 0) {
-        QMessageBox::critical(this, "错误", "SDK初始化失败，请查看是否有其他程序在使用SDK?");
-        return;
-    }
-
-    // 2. 官方的 do-while 强制绑定与重搜机制
-    bool bCanResearch;
-    std::vector<SVzNLEyeCBInfo> vetDevice;
-    int nErrorCode = 0;
-
-    do {
-        bCanResearch = false;
-        VzNL_ResearchDevice(keSearchDeviceFlag_EthLaserRobotEye); // 搜索 3D 激光相机
-
-        int nDevCount = 0;
-        VzNL_GetEyeCBDeviceInfo(nullptr, &nDevCount);
-        if (nDevCount <= 0) break;
-
-        vetDevice.resize(nDevCount);
-        VzNL_GetEyeCBDeviceInfo(vetDevice.data(), &nDevCount);
-
-        for (auto& devInfo : vetDevice) {
-            if (devInfo.bValidDevice == VzFalse) {
-                // 尝试绑定未识别的相机
-                if (VzNL_BindEthernetEye(&devInfo) == 0) {
-                    bCanResearch = true; // 绑定成功，必须重新搜索
-                    break;
-                }
-            }
-        }
-    } while (bCanResearch);
-
-    // 3. 寻找有效设备并打开
-    for (auto& devInfo : vetDevice) {
-        if (devInfo.bValidDevice == VzTrue) {
-            SVzNLOpenDeviceParam sOpenDevParam;
-            memset(&sOpenDevParam, 0, sizeof(SVzNLOpenDeviceParam));
-
-            m_mainCameraHandle = VzNL_OpenDevice(&devInfo, &sOpenDevParam, &nErrorCode);
-            if (m_mainCameraHandle != nullptr) {
-                QMessageBox::information(this, "成功", QString("成功打开相机 IP: %1").arg((char*)devInfo.byServerIP));
-
-                // 官方建议：开启 RGB 与摆动电机 (如果硬件支持)
-                VzNL_EnableRGB(m_mainCameraHandle, VzTrue);
-                if (VzNL_IsSupportSwingMotor(m_mainCameraHandle, nullptr)) {
-                    VzNL_EnableSwingMotor(m_mainCameraHandle, VzTrue);
-                }
-                return; // 成功连接一台即可返回
-            }
-        }
-    }
-    QMessageBox::critical(this, "错误", QString("打开设备失败，错误码：%1").arg(nErrorCode));
-}
-
-void MainWindow::onCloseDeviceTriggered()
-{
-    qDebug() << "点击了关闭设备按钮";
-    if (m_mainCameraHandle != nullptr) {
-        if (m_isCapturing) {
-            VzNL_StopCapture(m_mainCameraHandle);
-            m_isCapturing = false;
-        }
-        VzNL_CloseDevice(m_mainCameraHandle);
-        m_mainCameraHandle = nullptr;
-    }
-}
-
-void MainWindow::_AutoOutputLaserLineExCB(EVzResultDataType eDataType, SVzLaserLineData* pLaserLinePoint, void* pParam)
-{
-    // 这里用于接收底层的高频激光线数据 (用于拼接点云和深度图)
-    // 根据官方警告，不要在此处做耗时操作。
-    // 由于我们在 UI 线程的 Stop 操作里抓取了最终合成图，这里暂可不写业务逻辑。
-
-    // 使用 Q_UNUSED 消除编译器“形参未引用”的警告
-    Q_UNUSED(eDataType);
-    Q_UNUSED(pLaserLinePoint);
-    Q_UNUSED(pParam);
-}

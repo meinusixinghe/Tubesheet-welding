@@ -14,7 +14,7 @@
 #include "modbusmanager.h"
 #include <QCloseEvent>
 #include <QSettings>
-#include "VZNL_Common.h"
+#include "vizumcamera.h"
 
 class RenderArea;
 class usercoordinatemanager;
@@ -75,10 +75,6 @@ private slots:
 
     // 持续发送下一个管孔的函数
     void sendNextWeldHole();
-
-    void onCaptureTriggered();
-    void onOpenDeviceTriggered();
-    void onCloseDeviceTriggered();
 
 private:
     void loadDrawingData(const QString &filePath);      // 核心数据加载函数
@@ -145,11 +141,7 @@ private:
     int m_positioningMethod = 0;                        // 保存用户选择的定位方式号，默认为 0
     bool m_isPathPlanned = false;
 
-    VZNLHANDLE m_mainCameraHandle = nullptr;
-    bool m_isCapturing = false;
-    QAction *m_captureAction = nullptr;
-
-    static void _AutoOutputLaserLineExCB(EVzResultDataType eDataType, SVzLaserLineData* pLaserLinePoint, void* pParam);
+    VizumCamera *m_camera;
 };
 
 #endif // MAINWINDOW_H

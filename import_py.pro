@@ -20,6 +20,7 @@ SOURCES += \
     renderarea.cpp \
     rotationmatrixdialog.cpp \
     usercoordinatemanager.cpp \
+    vizumcamera.cpp \
     weldingprocessdialog.cpp
 
 HEADERS += \
@@ -47,6 +48,7 @@ HEADERS += \
     renderarea.h \
     rotationmatrixdialog.h \
     usercoordinatemanager.h \
+    vizumcamera.h \
     weldingprocessdialog.h
 
 FORMS += \
