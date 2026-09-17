@@ -32,6 +32,9 @@ private:
     QAction *m_openDeviceAction = nullptr;
     QAction *m_captureAction = nullptr;
     QAction *m_closeDeviceAction = nullptr;
+    SVzVideoResolution m_sRGBVideoRes;
+    SVzNLPointXYZRGBA* m_p2DToPointMap = nullptr;
+    bool* m_pb2DInvalidPt = nullptr;
 
     static void _AutoOutputLaserLineExCB(EVzResultDataType eDataType, SVzLaserLineData* pLaserLinePoint, void* pParam);
 

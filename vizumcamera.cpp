@@ -5,6 +5,7 @@
 #include "VZNL_EyeConfig.h"
 #include "VZNL_RGBConfig.h"
 #include "VZNL_SwingMotor.h"
+#include "VZNL_Utils.h"
 #include <QDir>
 #include <QCoreApplication>
 #include <QDateTime>
@@ -16,7 +17,7 @@ VizumCamera::VizumCamera(QObject *parent) : QObject(parent)
 
 VizumCamera::~VizumCamera()
 {
-
+    onCloseDeviceTriggered();
 }
 
 void VizumCamera::initActions()
@@ -43,32 +44,109 @@ void VizumCamera::addActionsToToolBar(QToolBar *toolbar)
 void VizumCamera::onCaptureTriggered()
 {
     if (m_mainCameraHandle == nullptr) {
-        emit errorOccurred("警告请先打开设备！");
+        emit errorOccurred("警告：请先打开设备！");
         return;
     }
 
     if (!m_isCapturing) {
-        // 1. 启用 RGB Sensor 与摆动电机 (严格参考官方)
-        VzNL_EnableRGB(m_mainCameraHandle, VzTrue);
-        VzNL_EnableSwingMotor(m_mainCameraHandle, VzTrue);
+        // ==========================================
+        // 阶段 1：获取相机的底层原始二维灰度图
+        // (必须在启动激光 3D 扫描前进行)
+        // ==========================================
 
-        // 2. 创建激光线检测工具
+        // 保存相机的旧曝光和 ROI 状态以便后续恢复
+        unsigned int nOldExpose = 0;
+        EVzNLExposeMode eExposeMode = keVzNLExposeMode_Fix;
+        VzNL_GetConfigEyeExpose(m_mainCameraHandle, &eExposeMode, &nOldExpose);
+
+        SVzNLROIRect sOldLeftROI, sOldRightROI;
+        VzNL_GetConfigDetectROI(m_mainCameraHandle, &sOldLeftROI, &sOldRightROI);
+
+        // 🌟 2. 核心修复：获取相机真实的最大物理分辨率[cite: 15]
+        SVzNLEyeDeviceInfoEx sDeviceInfoEx;
+        sDeviceInfoEx.sEyeCBInfo.nSize = sizeof(SVzNLEyeDeviceInfoEx);
+        VzNL_GetDeviceInfo(m_mainCameraHandle, &sDeviceInfoEx.sEyeCBInfo);
+
+        int maxWidth = sDeviceInfoEx.sVideoRes.nFrameWidth;
+        int maxHeight = sDeviceInfoEx.sVideoRes.nFrameHeight;
+
+        // 🌟 3. 构造全视野的 ROI 区域，防止画面被裁剪
+        SVzNLROIRect fullLeftROI, fullRightROI;
+        fullLeftROI.left = 0; fullLeftROI.top = 0;
+        fullLeftROI.right = maxWidth; fullLeftROI.bottom = maxHeight;
+
+        fullRightROI.left = 0; fullRightROI.top = 0;
+        fullRightROI.right = maxWidth; fullRightROI.bottom = maxHeight;
+
+        // 切换至定焦标定模式
+        VzNL_EnableCalibROI(m_mainCameraHandle, VzTrue);
+
+        // 🌟 4. 强制应用全视野 ROI，并提高曝光拍出明亮的全景图[cite: 15]
+        VzNL_ConfigDetectROI(m_mainCameraHandle, &fullLeftROI, &fullRightROI);
+        VzNL_ConfigEyeExpose(m_mainCameraHandle, keVzNLExposeMode_Fix, 50000);
+
+        // 抓取全景底图 (超时时间 5000ms)
+        SVzNLImageData* pLeftImage = nullptr;
+        SVzNLImageData* pRightImage = nullptr;
+        int nImgErr = VzNL_GetEyeImage(m_mainCameraHandle, &pLeftImage, &pRightImage, 5000);
+
+        QString saveDir = QCoreApplication::applicationDirPath() + "/CaptureImages";
+        QDir().mkpath(saveDir);
+        QString timeStr = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+
+        if (nImgErr == 0 && pLeftImage != nullptr) {
+            QString grayFileName = saveDir + QString("/GrayLeft_%1.png").arg(timeStr);
+            if (VzNL_SaveImage(grayFileName.toUtf8().data(), pLeftImage) == 0) {
+                qDebug() << "1️⃣ 原始全景灰度图像已成功保存至：" << grayFileName;
+                emit imageSaved(grayFileName);
+            }
+            VzNL_ReleaseImage(&pLeftImage);
+            VzNL_ReleaseImage(&pRightImage);
+        } else {
+            qDebug() << "获取底层灰度图像失败，错误码:" << nImgErr;
+        }
+
+        // 拍完恢复旧的 ROI 和旧曝光，以免影响接下来的高频激光扫描[cite: 15]
+        VzNL_EnableCalibROI(m_mainCameraHandle, VzFalse);
+        VzNL_ConfigEyeExpose(m_mainCameraHandle, keVzNLExposeMode_Fix, nOldExpose);
+        VzNL_ConfigDetectROI(m_mainCameraHandle, &sOldLeftROI, &sOldRightROI);
+
+        // ==========================================
+        // 阶段 2：正式开启 3D 激光扫描流
+        // ==========================================
+        VzNL_EnableRGB(m_mainCameraHandle, VzTrue);
+
         int nErr = VzNL_BeginDetectLaser(m_mainCameraHandle);
         if (nErr != 0) {
-            emit errorOccurred( QString("创建检测激光线工具失败，错误码：%1").arg(nErr));
+            emit errorOccurred(QString("创建检测激光线工具失败，错误码：%1").arg(nErr));
             return;
         }
 
-        // 3. 设置主模式
-        VzNL_SetTriggerMode(m_mainCameraHandle, keEyeTriggerMode_Master);
+        // 获取分辨率并为 3D 点云开辟内存空间
+        VzNL_GetRGBResolution(m_mainCameraHandle, &m_sRGBVideoRes);
+        int nFrameSize = m_sRGBVideoRes.nFrameWidth * m_sRGBVideoRes.nFrameHeight;
 
-        // 4. 开始流模式检测 (使用 3D 专属 API)
+        if (m_p2DToPointMap) { delete[] m_p2DToPointMap; m_p2DToPointMap = nullptr; }
+        if (m_pb2DInvalidPt) { delete[] m_pb2DInvalidPt; m_pb2DInvalidPt = nullptr; }
+
+        m_p2DToPointMap = new SVzNLPointXYZRGBA[nFrameSize];
+        m_pb2DInvalidPt = new bool[nFrameSize];
+        memset(m_p2DToPointMap, 0, sizeof(SVzNLPointXYZRGBA) * nFrameSize);
+        memset(m_pb2DInvalidPt, 0, sizeof(bool) * nFrameSize);
+
+        VzNL_SetTriggerMode(m_mainCameraHandle, keEyeTriggerMode_Master);
+        unsigned int nMin, nMax;
+        VzNL_QueryParamRange(m_mainCameraHandle, keDeviceParamType_FrameRate, &nMin, &nMax);
+        VzNL_SetFrameRate(m_mainCameraHandle, nMax);
+
+        VzNL_EnableSwingMotor(m_mainCameraHandle, VzTrue);
+
         nErr = VzNL_StartAutoDetectEx(m_mainCameraHandle, keResultDataType_PointXYZRGBA, keFlipType_None, _AutoOutputLaserLineExCB, this);
 
         if (nErr == 0) {
             m_isCapturing = true;
             m_captureAction->setText("停止扫描并保存图像");
-            qDebug() << "激光扫描已启动，请等待扫描完成后点击停止...";
+            qDebug() << "▶ 激光扫描已启动，请等待扫描完成后点击停止...";
         } else {
             emit errorOccurred(QString("开流失败，错误码：%1").arg(nErr));
             VzNL_EndDetectLaser(m_mainCameraHandle);
@@ -76,39 +154,79 @@ void VizumCamera::onCaptureTriggered()
 
     } else {
         // ==========================================
-        // 停止扫描并提取 2D 表面图
+        // 阶段 3：停止扫描并提取/保存 3D 数据结果
         // ==========================================
         VzNL_StopAutoDetect(m_mainCameraHandle);
         m_isCapturing = false;
         m_captureAction->setText("开启采图");
 
-        // 1. 提取自动合成的表面图像
+        QString saveDir = QCoreApplication::applicationDirPath() + "/CaptureImages";
+        QString timeStr = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+
+        if (m_p2DToPointMap != nullptr) {
+            // 2️⃣ 提取并保存真实的 3D 深度图 (.tif格式)
+            QString depthFileName = saveDir + QString("/DepthData_%1.tif").arg(timeStr);
+            if (VzNL_SaveDepthMapTiffImage(depthFileName.toUtf8().data(), m_sRGBVideoRes.nFrameWidth, m_sRGBVideoRes.nFrameHeight, keResultDataType_PointXYZRGBA, m_p2DToPointMap) == 0) {
+                qDebug() << "2️⃣ 3D 原始深度图已成功保存至：" << depthFileName;
+                emit imageSaved(depthFileName);
+            }
+
+            // 3️⃣ 渲染 2D 可视化深度点云图 (.png格式)
+            SVzNLImageData depthImageData;
+            depthImageData.nWidth = m_sRGBVideoRes.nFrameWidth;
+            depthImageData.nHeight = m_sRGBVideoRes.nFrameHeight;
+            depthImageData.nChannels = 3;
+            depthImageData.nBufferSize = depthImageData.nWidth * depthImageData.nHeight * 3;
+            depthImageData.byBitDepth = 8;
+            depthImageData.eImageType = keVzNLImageType_BGR888;
+            depthImageData.ptOriPos.x = 0;
+            depthImageData.ptOriPos.y = 0;
+
+            depthImageData.pBuffer = new unsigned char[depthImageData.nBufferSize];
+            memset(depthImageData.pBuffer, 0, depthImageData.nBufferSize);
+
+            int nWritePos = 0;
+            unsigned char* pRGB = depthImageData.pBuffer;
+            for (int nHIdx = 0; nHIdx < depthImageData.nHeight; nHIdx++) {
+                for (int nWIdx = 0; nWIdx < depthImageData.nWidth; nWIdx++) {
+                    if (m_pb2DInvalidPt[nWritePos]) {
+                        unsigned char* pCurRGB = (unsigned char*)&m_p2DToPointMap[nWritePos].nRGB;
+                        pRGB[0] = pCurRGB[2];
+                        pRGB[1] = pCurRGB[1];
+                        pRGB[2] = pCurRGB[0];
+                    }
+                    nWritePos++;
+                    pRGB += 3;
+                }
+            }
+
+            QString depthPngName = saveDir + QString("/DepthMap_%1.png").arg(timeStr);
+            if (VzNL_SaveImage(depthPngName.toUtf8().data(), &depthImageData) == 0) {
+                qDebug() << "3️⃣ 2D 可视化深度图已保存至：" << depthPngName;
+                emit imageSaved(depthPngName);
+            }
+            delete[] depthImageData.pBuffer;
+        }
+
+        // 4️⃣ 保存 2D 表面参考图像 (自动中心图)
         SVzNLImageData* psCenterImage = nullptr;
         VzNL_GetAutoDetectResultSurface(m_mainCameraHandle, &psCenterImage);
 
         if (psCenterImage != nullptr) {
-            // 2. 构建保存路径
-            QString saveDir = QCoreApplication::applicationDirPath() + "/CaptureImages";
-            QDir().mkpath(saveDir);
-            QString fileName = saveDir + QString("/Surface_%1.png").arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
-
-            // 3. 保存图像
-            if (VzNL_SaveImage(fileName.toUtf8().data(), psCenterImage) == 0) {
-                qDebug() << "表面图像已成功保存至：" << fileName;
-                emit imageSaved(fileName);
-            } else {
-                qDebug() << "图像保存失败！";
+            QString surfaceFileName = saveDir + QString("/Surface_%1.png").arg(timeStr);
+            if (VzNL_SaveImage(surfaceFileName.toUtf8().data(), psCenterImage) == 0) {
+                qDebug() << "4️⃣ 2D 表面图像已成功保存至：" << surfaceFileName;
+                emit imageSaved(surfaceFileName);
             }
-
-            // 4. 释放内存 (必须执行，否则内存泄漏)
             VzNL_ReleaseImage(&psCenterImage);
-        } else {
-            emit errorOccurred("未能提取到有效的表面图像，请检查扫描过程是否完整。");
         }
 
-        // 5. 结束激光检测工具
+        // 清理内存
+        if (m_p2DToPointMap) { delete[] m_p2DToPointMap; m_p2DToPointMap = nullptr; }
+        if (m_pb2DInvalidPt) { delete[] m_pb2DInvalidPt; m_pb2DInvalidPt = nullptr; }
+
         VzNL_EndDetectLaser(m_mainCameraHandle);
-        qDebug() << "激光扫描已安全结束。";
+        qDebug() << "⏹ 激光扫描已安全结束，本次共保存 4 张图像数据。";
     }
 }
 
@@ -119,7 +237,6 @@ void VizumCamera::onOpenDeviceTriggered()
         return;
     }
 
-    // 1. 初始化 SDK (官方推荐带超时参数)
     SVzNLConfigParam configParam;
     memset(&configParam, 0, sizeof(SVzNLConfigParam));
     configParam.nDeviceTimeOut = 0;
@@ -128,14 +245,13 @@ void VizumCamera::onOpenDeviceTriggered()
         return;
     }
 
-    // 2. 官方的 do-while 强制绑定与重搜机制
     bool bCanResearch;
     std::vector<SVzNLEyeCBInfo> vetDevice;
     int nErrorCode = 0;
 
     do {
         bCanResearch = false;
-        VzNL_ResearchDevice(keSearchDeviceFlag_EthLaserRobotEye); // 搜索 3D 激光相机
+        VzNL_ResearchDevice(keSearchDeviceFlag_EthLaserRobotEye);
 
         int nDevCount = 0;
         VzNL_GetEyeCBDeviceInfo(nullptr, &nDevCount);
@@ -146,16 +262,14 @@ void VizumCamera::onOpenDeviceTriggered()
 
         for (auto& devInfo : vetDevice) {
             if (devInfo.bValidDevice == VzFalse) {
-                // 尝试绑定未识别的相机
                 if (VzNL_BindEthernetEye(&devInfo) == 0) {
-                    bCanResearch = true; // 绑定成功，必须重新搜索
+                    bCanResearch = true;
                     break;
                 }
             }
         }
     } while (bCanResearch);
 
-    // 3. 寻找有效设备并打开
     for (auto& devInfo : vetDevice) {
         if (devInfo.bValidDevice == VzTrue) {
             SVzNLOpenDeviceParam sOpenDevParam;
@@ -168,12 +282,14 @@ void VizumCamera::onOpenDeviceTriggered()
                 m_closeDeviceAction->setEnabled(true);
                 m_openDeviceAction->setEnabled(false);
 
-                // 官方建议：开启 RGB 与摆动电机 (如果硬件支持)
                 VzNL_EnableRGB(m_mainCameraHandle, VzTrue);
                 if (VzNL_IsSupportSwingMotor(m_mainCameraHandle, nullptr)) {
                     VzNL_EnableSwingMotor(m_mainCameraHandle, VzTrue);
                 }
-                return; // 成功连接一台即可返回
+
+                // 🌟 修复点：抛出设备成功连接的信号，携带 IP 地址
+                emit deviceOpened(QString((char*)devInfo.byServerIP));
+                return;
             }
         }
     }
@@ -185,18 +301,19 @@ void VizumCamera::onCloseDeviceTriggered()
     if (m_mainCameraHandle != nullptr) {
         // 如果还在采图，先安全停止
         if (m_isCapturing) {
-            VzNL_StopAutoDetect(m_mainCameraHandle);
-            VzNL_EndDetectLaser(m_mainCameraHandle);
-            m_isCapturing = false;
+            onCaptureTriggered(); // 🌟 直接复用采图逻辑，保证内存和硬件被正确释放
         }
 
         VzNL_CloseDevice(m_mainCameraHandle);
         m_mainCameraHandle = nullptr;
 
-        m_captureAction->setText("▶ 开启采图");
+        m_captureAction->setText("开启采图");
         m_captureAction->setEnabled(false);
         m_closeDeviceAction->setEnabled(false);
         m_openDeviceAction->setEnabled(true);
+
+        // 释放整个 SDK 环境
+        VzNL_Destroy();
 
         qDebug() << "相机已安全关闭";
         emit deviceClosed();
@@ -205,12 +322,27 @@ void VizumCamera::onCloseDeviceTriggered()
 
 void VizumCamera::_AutoOutputLaserLineExCB(EVzResultDataType eDataType, SVzLaserLineData* pLaserLinePoint, void* pParam)
 {
-    // 这里用于接收底层的高频激光线数据 (用于拼接点云和深度图)
-    // 根据官方警告，不要在此处做耗时操作。
-    // 由于我们在 UI 线程的 Stop 操作里抓取了最终合成图，这里暂可不写业务逻辑。
+    if (keResultDataType_PointXYZRGBA != eDataType || pParam == nullptr) return;
 
-    // 使用 Q_UNUSED 消除编译器“形参未引用”的警告
-    Q_UNUSED(eDataType);
-    Q_UNUSED(pLaserLinePoint);
     VizumCamera* pThis = static_cast<VizumCamera*>(pParam);
+    if (pThis->m_p2DToPointMap == nullptr || pThis->m_pb2DInvalidPt == nullptr) return;
+
+    SVzNLPointXYZRGBA* p3DPoint = (SVzNLPointXYZRGBA*)pLaserLinePoint->p3DPoint;
+    SVzNL2DLRPoint* p2DPoint = (SVzNL2DLRPoint*)pLaserLinePoint->p2DPoint;
+
+    for (int nPtIdx = 0; nPtIdx < pLaserLinePoint->nPointCount; nPtIdx++)
+    {
+        int x = p2DPoint->sLeft.x;
+        int y = p2DPoint->sLeft.y;
+
+        if (x >= 0 && x < pThis->m_sRGBVideoRes.nFrameWidth &&
+            y >= 0 && y < pThis->m_sRGBVideoRes.nFrameHeight)
+        {
+            int nPos = x + y * pThis->m_sRGBVideoRes.nFrameWidth;
+            pThis->m_p2DToPointMap[nPos] = *p3DPoint;
+            pThis->m_pb2DInvalidPt[nPos] = true;
+        }
+        p3DPoint++;
+        p2DPoint++;
+    }
 }
