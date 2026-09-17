@@ -14,6 +14,11 @@ VizumCamera::VizumCamera(QObject *parent) : QObject(parent)
     VizumCamera::initActions();
 }
 
+VizumCamera::~VizumCamera()
+{
+
+}
+
 void VizumCamera::initActions()
 {
     m_openDeviceAction=new QAction("打开设备",this);

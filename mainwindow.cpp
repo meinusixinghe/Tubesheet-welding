@@ -306,6 +306,12 @@ void MainWindow::setupUi()
 
     m_camera=new VizumCamera(this);
     m_camera->addActionsToToolBar(toolBar);
+    connect(m_camera, &VizumCamera::deviceOpened, this, [this](QString ip){
+        m_statusLabel->setText("相机已连接：" + ip);
+    });
+    connect(m_camera, &VizumCamera::errorOccurred, this, [this](QString msg){
+        QMessageBox::warning(this, "相机错误", msg);
+    });
 
 
     // 初始化坐标管理器

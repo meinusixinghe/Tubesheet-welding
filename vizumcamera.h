@@ -7,11 +7,11 @@
 #include <QObject>
 #include "VZNL_Common.h"
 
-class VizumCamera : QObject
+class VizumCamera : public QObject
 {
     Q_OBJECT
 public:
-    explicit VizumCamera(QObject *parent);
+    explicit VizumCamera(QObject *parent=nullptr);
     ~VizumCamera();
 
     void addActionsToToolBar(QToolBar *toolbar);                // 添加动作到工具栏
