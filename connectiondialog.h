@@ -1,6 +1,7 @@
 #ifndef CONNECTIONDIALOG_H
 #define CONNECTIONDIALOG_H
 
+#include "VZNL_Types.h"
 #include <QDialog>
 #include <QString>
 #include <QLineEdit>
@@ -31,6 +32,8 @@ private:
     QLineEdit *portLineEdit;
     QPushButton *connectBtn;
     QPushButton *cancelBtn;
+
+    int m_action;
 };
 
 #endif // CONNECTIONDIALOG_H

@@ -9,7 +9,7 @@
 #include <QDebug>
 
 ConnectionDialog::ConnectionDialog(QWidget *parent)
-    : QDialog(parent)
+    : QDialog(parent), m_action(1)
 {
     setWindowTitle("工业控制设备通信连接");
     setMinimumSize(480, 380);
@@ -33,7 +33,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent)
     mainLayout->addWidget(robotGroup);
 
     // =========================================================
-    // 3. 底部确认区
+    // 2. 底部确认区
     // =========================================================
     QHBoxLayout *btnLayout = new QHBoxLayout();
     connectBtn = new QPushButton("确认参数并返回", this);
@@ -58,11 +58,13 @@ ConnectionDialog::~ConnectionDialog()
 
 QString ConnectionDialog::getIp() const { return ipLineEdit->text(); }
 int ConnectionDialog::getPort() const { return portLineEdit->text().toInt(); }
+int ConnectionDialog::getAction() const { return m_action; }
 void ConnectionDialog::setIp(const QString& ip) { ipLineEdit->setText(ip); }
 void ConnectionDialog::setPort(int port) { portLineEdit->setText(QString::number(port)); }
 
 void ConnectionDialog::onConnectRobotClicked()
 {
+    m_action = 0;
     accept();
 }
 

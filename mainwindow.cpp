@@ -1015,8 +1015,6 @@ void MainWindow::loadWeldingProcesses()
 void MainWindow::onConnectTriggered()
 {
     ConnectionDialog dlg(this);
-    dlg.setIp(m_lastIp);
-    dlg.setPort(m_lastPort);
 
     if (dlg.exec() == QDialog::Accepted) {
 
