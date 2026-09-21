@@ -140,3 +140,31 @@ CONFIG(debug, debug|release) {
 } else {
     LIBS += -lpcl_common -lpcl_io
 }
+
+# 🌟 5. 引入 PCL 可视化模块
+CONFIG(debug, debug|release) {
+    LIBS += -lpcl_visualizationd
+} else {
+    LIBS += -lpcl_visualization
+}
+
+# 🌟 6. 终极绝招：利用 qmake 自动遍历并链接所有的 VTK 静态库，防止 LNK2019 报错
+VTK_LIB_PATH = $$PCL_ROOT/3rdParty/VTK/lib
+VTK_LIBS_ALL = $$files($$VTK_LIB_PATH/*.lib)
+VTK_LIBS_DEBUG = $$files($$VTK_LIB_PATH/*-gd.lib)
+
+# 巧妙的 qmake 减法：从所有库中减去带 -gd.lib 的，剩下的就是纯 Release 库
+VTK_LIBS_RELEASE = $$VTK_LIBS_ALL
+VTK_LIBS_RELEASE -= $$VTK_LIBS_DEBUG
+
+CONFIG(debug, debug|release) {
+    # Debug 模式下，只链接带 -gd 尾缀的库
+    for(lib, VTK_LIBS_DEBUG) {
+        LIBS += $$lib
+    }
+} else {
+    # Release 模式下，只链接不带 -gd 尾缀的库
+    for(lib, VTK_LIBS_RELEASE) {
+        LIBS += $$lib
+    }
+}

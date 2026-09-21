@@ -79,6 +79,9 @@ private slots:
     // 设置相机保存图像路径
     void onSetSaveDirTriggered();
 
+    // 查看 3D 点云
+    void onViewPointCloudTriggered();
+
 private:
     void loadDrawingData(const QString &filePath);      // 核心数据加载函数
     void setupUi();                                     // UI初始化函数
@@ -146,6 +149,8 @@ private:
 
     QAction *m_setSaveDirAction = nullptr;              // 设置存储相机图片
     VizumCamera *m_camera;
+
+    QAction *m_viewPointCloudAction = nullptr;          // 查看点云菜单动作
 };
 
 #endif // MAINWINDOW_H

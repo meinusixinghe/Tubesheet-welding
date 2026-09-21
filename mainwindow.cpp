@@ -26,6 +26,16 @@
 #include <QInputDialog>
 #include <QSettings>
 #include <QCloseEvent>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/io/pcd_io.h>
+#include <pcl/visualization/pcl_visualizer.h>
+#include <vtkAutoInit.h>
+VTK_MODULE_INIT(vtkRenderingOpenGL2); // 初始化 OpenGL2 渲染后端
+VTK_MODULE_INIT(vtkInteractionStyle); // 初始化鼠标交互模式
+VTK_MODULE_INIT(vtkRenderingFreeType); // 初始化 3D 字体渲染
+#include <vtkObject.h>
+
 
 MainWindow::MainWindow(QWidget *parent): QMainWindow(parent)
 {
@@ -205,6 +215,9 @@ void MainWindow::setupUi()
     fileMenu->addAction(loadAction);
     m_setSaveDirAction = new QAction("设置图片保存路径",this);
     fileMenu->addAction(m_setSaveDirAction);
+    m_viewPointCloudAction = new QAction("查看本地 3D 点云 (.pcd)", this);
+    fileMenu->addAction(m_viewPointCloudAction);
+    connect(m_viewPointCloudAction, &QAction::triggered, this, &MainWindow::onViewPointCloudTriggered);
 
     m_operationMenu = menuBar()->addMenu("操作");
     rotateAction = new QAction("应用旋转矩阵", this);
@@ -1308,4 +1321,52 @@ void MainWindow::onSetSaveDirTriggered()
 
         QMessageBox::information(this, "设置成功", "保存路径已更新并保存至配置文件:\n" + dir);
     }
+}
+
+// ==========================================
+// 菜单栏：查看本地 3D 点云 (独立 3D 窗口渲染)
+// ==========================================
+void MainWindow::onViewPointCloudTriggered()
+{
+    // 1. 弹出文件选择器，默认打开相机设置的保存目录
+    QString currentDir = m_camera->getSaveDirectory();
+    QString filePath = QFileDialog::getOpenFileName(this, "选择 3D 点云文件", currentDir, "PCD Files (*.pcd)");
+    if(filePath.isEmpty()) return;
+
+    m_statusLabel->setText("正在加载 3D 点云数据，请稍候...");
+    QApplication::processEvents(); // 刷新UI状态
+
+    // 2. 加载 .pcd 点云文件到内存
+    pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
+    if (pcl::io::loadPCDFile<pcl::PointXYZRGBA>(filePath.toStdString(), *cloud) == -1) {
+        QMessageBox::critical(this, "读取失败", "无法读取 PCD 文件或文件已损坏！");
+        m_statusLabel->setText("就绪");
+        return;
+    }
+
+    m_statusLabel->setText(QString("成功加载点云，总点数: %1").arg(cloud->size()));
+    vtkObject::GlobalWarningDisplayOff();
+
+    // 3. 启动 PCL 原生 3D 渲染引擎
+    // 注意：这里使用独立的智能指针管理，弹出的将是一个纯正的 3D 视口
+    pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("管板 3D 点云检视器 (PCL Native)"));
+
+    // 配置视口背景色 (深灰色，看起来更工业风)
+    viewer->setBackgroundColor(0.15, 0.15, 0.15);
+
+    // 将点云加入渲染器，并设置点的大小为 2
+    viewer->addPointCloud<pcl::PointXYZRGBA>(cloud, "tubesheet_cloud");
+    viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "tubesheet_cloud");
+
+    // 添加 XYZ 三维空间坐标系辅助线 (长度100mm)
+    viewer->addCoordinateSystem(100.0);
+    viewer->initCameraParameters();
+
+    // 4. 渲染循环 (完美融合 Qt 事件流，不卡死主界面)
+    while (!viewer->wasStopped()) {
+        viewer->spinOnce(50); // 渲染器每 50 毫秒刷新一次
+        QApplication::processEvents(); // 将控制权短暂交还给 Qt，保证主窗口按钮仍能响应
+    }
+
+    m_statusLabel->setText("3D 检视器已关闭。");
 }
