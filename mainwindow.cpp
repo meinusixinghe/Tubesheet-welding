@@ -30,10 +30,6 @@
 #include <pcl/point_types.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/visualization/pcl_visualizer.h>
-#include <vtkAutoInit.h>
-VTK_MODULE_INIT(vtkRenderingOpenGL2); // 初始化 OpenGL2 渲染后端
-VTK_MODULE_INIT(vtkInteractionStyle); // 初始化鼠标交互模式
-VTK_MODULE_INIT(vtkRenderingFreeType); // 初始化 3D 字体渲染
 #include <vtkObject.h>
 #include "pointcloudprocessor.h"
 
@@ -1342,49 +1338,69 @@ void MainWindow::onViewPointCloudTriggered()
         m_statusLabel->setText("就绪");
         return;
     }
+
     m_statusLabel->setText("点云加载完毕，正在运行 3D 智能分析算法...");
     QApplication::processEvents();
 
-    // ==========================================
-    // 🌟 核心：实例化算法类，并执行提取
-    // ==========================================
     PointCloudProcessor processor;
     pcl::PointCloud<pcl::PointXYZRGBA>::Ptr baseSurface(new pcl::PointCloud<pcl::PointXYZRGBA>);
     pcl::PointCloud<pcl::PointXYZRGBA>::Ptr features(new pcl::PointCloud<pcl::PointXYZRGBA>);
 
     bool ok = processor.extractTubeSheetSurface(cloud, baseSurface, features);
 
-    // 启动 PCL 原生 3D 渲染引擎
-    vtkObject::GlobalWarningDisplayOff();
-    pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("管板 3D 智能识别结果"));
-    viewer->setBackgroundColor(0.12, 0.12, 0.12); // 极客深灰背景
+    QStringList pcdFilesToView;
 
     if (ok) {
-        // 1. 将平坦的母材表面 (Inliers) 渲染为深蓝色
-        pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> blue(baseSurface, 30, 144, 255);
-        viewer->addPointCloud<pcl::PointXYZRGBA>(baseSurface, blue, "base_surface");
-        viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "base_surface");
+        try {
+            qDebug() << ">> [UI 阶段] 准备给母材和特征点云上色...";
+            for (auto& p : baseSurface->points) { p.r = 30; p.g = 144; p.b = 255; p.a = 255; }
+            for (auto& p : features->points)    { p.r = 255; p.g = 50; p.b = 50; p.a = 255; }
 
-        // 2. 将凸起的焊缝 (Outliers) 渲染为耀眼的红色
-        pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> red(features, 255, 50, 50);
-        viewer->addPointCloud<pcl::PointXYZRGBA>(features, red, "features");
-        viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 3, "features");
+            // 🌟 强行修复 PCL 尺寸属性，防止保存时内存越界崩溃
+            baseSurface->width = baseSurface->points.size();
+            baseSurface->height = 1;
+            baseSurface->is_dense = false;
 
-        m_statusLabel->setText(QString("算法分析完成！母材点: %1, 焊缝特征点: %2").arg(baseSurface->size()).arg(features->size()));
+            features->width = features->points.size();
+            features->height = 1;
+            features->is_dense = false;
+
+            qDebug() << ">> [UI 阶段] 正在保存临时 PCD 文件...";
+            QString tempBase = QCoreApplication::applicationDirPath() + "/temp_base.pcd";
+            QString tempFeat = QCoreApplication::applicationDirPath() + "/temp_features.pcd";
+
+            // 🌟 关键修复 1：将 toStdString 改为 toLocal8Bit，完美兼容 Windows 路径
+            // 🌟 关键修复 2：改用 ASCII 模式保存，彻底杜绝 Binary 模式的内存 Dump Bug
+            pcl::io::savePCDFileASCII(tempBase.toLocal8Bit().constData(), *baseSurface);
+            pcl::io::savePCDFileASCII(tempFeat.toLocal8Bit().constData(), *features);
+            qDebug() << ">> [UI 阶段] 临时文件保存成功！";
+
+            pcdFilesToView << tempBase << tempFeat;
+            m_statusLabel->setText(QString("算法分析完成！母材点: %1, 焊缝特征点: %2").arg(baseSurface->size()).arg(features->size()));
+        } catch (const std::exception &e) {
+            qDebug() << "❌ [UI 阶段] 保存或上色时发生异常：" << e.what();
+            QMessageBox::critical(this, "严重错误", "保存分析结果时发生崩溃！");
+            return;
+        }
     } else {
-        // 如果算法失败，退回显示原始点云
-        viewer->addPointCloud<pcl::PointXYZRGBA>(cloud, "tubesheet_cloud");
-        m_statusLabel->setText("算法分析失败，显示原始点云。");
+        pcdFilesToView << filePath; // 算法失败时，仅显示原图
+        m_statusLabel->setText("算法分析失败，仅显示原始点云。");
     }
 
-    viewer->addCoordinateSystem(50.0);
-    viewer->initCameraParameters();
+    qDebug() << ">> [UI 阶段] 准备跨进程唤醒独立 3D 渲染器 (pcl_viewer.exe)...";
+    QProcess *viewerProcess = new QProcess(this);
+    QStringList arguments;
+    arguments << pcdFilesToView;
+    arguments << "-ps" << "3";               // 点尺寸放大，看得更清
+    arguments << "-bg" << "0.15,0.15,0.15";  // 极客深灰背景
 
-    // 渲染循环
-    while (!viewer->wasStopped()) {
-        viewer->spinOnce(50);
-        QApplication::processEvents();
+    // 启动外部看图神器，主程序彻底解耦！
+    viewerProcess->start("pcl_viewer.exe", arguments);
+
+    if (!viewerProcess->waitForStarted(2000)) {
+        qDebug() << "❌ [UI 阶段] 唤醒 pcl_viewer.exe 失败！";
+        QMessageBox::warning(this, "渲染器启动失败", "系统找不到 pcl_viewer.exe！\n请检查 C:\\PCL_1.12.1\\bin 是否已加入环境变量 Path。");
+    } else {
+        qDebug() << ">> [UI 阶段] 独立渲染器唤醒成功！完美收工！";
     }
-
-    m_statusLabel->setText("3D 分析器已关闭。");
 }
