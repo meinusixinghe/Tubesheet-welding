@@ -15,6 +15,8 @@ public:
     ~VizumCamera();
 
     void addActionsToToolBar(QToolBar *toolbar);                // 添加动作到工具栏
+    void setSaveDirectory(const QString& dir);
+    QString getSaveDirectory() const;
 
 signals:
     void deviceOpened(QString ip);
@@ -39,6 +41,8 @@ private:
     static void _AutoOutputLaserLineExCB(EVzResultDataType eDataType, SVzLaserLineData* pLaserLinePoint, void* pParam);
 
     void initActions(); // 内部初始化动作、绑定信号槽
+
+    QString m_saveDirectory;
 };
 
 #endif // VIZUMCAMERA_H

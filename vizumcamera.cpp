@@ -10,14 +10,31 @@
 #include <QCoreApplication>
 #include <QDateTime>
 
+#include <pcl/point_types.h>
+#include <pcl/point_cloud.h>
+#include <pcl/io/pcd_io.h>
+
 VizumCamera::VizumCamera(QObject *parent) : QObject(parent)
 {
     VizumCamera::initActions();
+    m_saveDirectory = QCoreApplication::applicationDirPath() + "/CaptureImages";
 }
 
 VizumCamera::~VizumCamera()
 {
     onCloseDeviceTriggered();
+}
+
+void VizumCamera::setSaveDirectory(const QString& dir)
+{
+    if (!dir.isEmpty()) {
+        m_saveDirectory = dir;
+    }
+}
+
+QString VizumCamera::getSaveDirectory() const
+{
+    return m_saveDirectory;
 }
 
 void VizumCamera::initActions()
@@ -90,7 +107,7 @@ void VizumCamera::onCaptureTriggered()
         SVzNLImageData* pRightImage = nullptr;
         int nImgErr = VzNL_GetEyeImage(m_mainCameraHandle, &pLeftImage, &pRightImage, 5000);
 
-        QString saveDir = QCoreApplication::applicationDirPath() + "/CaptureImages";
+        QString saveDir = m_saveDirectory;
         QDir().mkpath(saveDir);
         QString timeStr = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
 
@@ -153,25 +170,22 @@ void VizumCamera::onCaptureTriggered()
         }
 
     } else {
-        // ==========================================
-        // 阶段 3：停止扫描并提取/保存 3D 数据结果
-        // ==========================================
         VzNL_StopAutoDetect(m_mainCameraHandle);
         m_isCapturing = false;
         m_captureAction->setText("开启采图");
 
-        QString saveDir = QCoreApplication::applicationDirPath() + "/CaptureImages";
+        QString saveDir = m_saveDirectory;
         QString timeStr = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
 
         if (m_p2DToPointMap != nullptr) {
-            // 2️⃣ 提取并保存真实的 3D 深度图 (.tif格式)
+            // 2️提取并保存真实的 3D 深度图 (.tif格式)
             QString depthFileName = saveDir + QString("/DepthData_%1.tif").arg(timeStr);
             if (VzNL_SaveDepthMapTiffImage(depthFileName.toUtf8().data(), m_sRGBVideoRes.nFrameWidth, m_sRGBVideoRes.nFrameHeight, keResultDataType_PointXYZRGBA, m_p2DToPointMap) == 0) {
                 qDebug() << "2️⃣ 3D 原始深度图已成功保存至：" << depthFileName;
                 emit imageSaved(depthFileName);
             }
 
-            // 3️⃣ 渲染 2D 可视化深度点云图 (.png格式)
+            // 3️渲染 2D 可视化深度点云图 (.png格式)
             SVzNLImageData depthImageData;
             depthImageData.nWidth = m_sRGBVideoRes.nFrameWidth;
             depthImageData.nHeight = m_sRGBVideoRes.nFrameHeight;
@@ -206,6 +220,47 @@ void VizumCamera::onCaptureTriggered()
                 emit imageSaved(depthPngName);
             }
             delete[] depthImageData.pBuffer;
+
+            // ==========================================
+            // 🌟 新增的 5️⃣：将数据转换为 PCL 点云并保存为 .pcd
+            // ==========================================
+            pcl::PointCloud<pcl::PointXYZRGBA>::Ptr pclCloud(new pcl::PointCloud<pcl::PointXYZRGBA>());
+            int nPclReadPos = 0;
+
+            // 遍历整个画面，只提取有效的高精度 3D 点
+            for (int nHIdx = 0; nHIdx < m_sRGBVideoRes.nFrameHeight; nHIdx++) {
+                for (int nWIdx = 0; nWIdx < m_sRGBVideoRes.nFrameWidth; nWIdx++) {
+                    if (m_pb2DInvalidPt[nPclReadPos]) {
+                        pcl::PointXYZRGBA pclPoint;
+                        // 取出物理空间坐标 (单位 mm)
+                        pclPoint.x = m_p2DToPointMap[nPclReadPos].x;
+                        pclPoint.y = m_p2DToPointMap[nPclReadPos].y;
+                        pclPoint.z = m_p2DToPointMap[nPclReadPos].z;
+
+                        // 取出颜色信息 (RGBA 倒序处理)
+                        unsigned char* pCurRGB = (unsigned char*)&m_p2DToPointMap[nPclReadPos].nRGB;
+                        pclPoint.r = pCurRGB[2];
+                        pclPoint.g = pCurRGB[1];
+                        pclPoint.b = pCurRGB[0];
+                        pclPoint.a = 255;
+
+                        pclCloud->push_back(pclPoint); // 塞入 PCL 容器
+                    }
+                    nPclReadPos++;
+                }
+            }
+
+            // 设置 PCL 点云属性
+            pclCloud->width = pclCloud->size();
+            pclCloud->height = 1;
+            pclCloud->is_dense = false;
+
+            // 调用 PCL 保存文件
+            QString pcdFileName = saveDir + QString("/PclCloud_%1.pcd").arg(timeStr);
+            if (pcl::io::savePCDFileBinary(pcdFileName.toStdString(), *pclCloud) == 0) {
+                qDebug() << "5️⃣ PCL 点云图已成功保存至：" << pcdFileName << " (总点数:" << pclCloud->size() << ")";
+                emit imageSaved(pcdFileName);
+            }
         }
 
         // 4️⃣ 保存 2D 表面参考图像 (自动中心图)
@@ -221,12 +276,12 @@ void VizumCamera::onCaptureTriggered()
             VzNL_ReleaseImage(&psCenterImage);
         }
 
-        // 清理内存
+        // 🧹 清理堆区内存，防止内存泄漏
         if (m_p2DToPointMap) { delete[] m_p2DToPointMap; m_p2DToPointMap = nullptr; }
         if (m_pb2DInvalidPt) { delete[] m_pb2DInvalidPt; m_pb2DInvalidPt = nullptr; }
 
         VzNL_EndDetectLaser(m_mainCameraHandle);
-        qDebug() << "⏹ 激光扫描已安全结束，本次共保存 4 张图像数据。";
+        qDebug() << "⏹ 激光扫描已安全结束，本次共保存 5 种图像/点云数据。";
     }
 }
 

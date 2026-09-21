@@ -76,6 +76,9 @@ private slots:
     // 持续发送下一个管孔的函数
     void sendNextWeldHole();
 
+    // 设置相机保存图像路径
+    void onSetSaveDirTriggered();
+
 private:
     void loadDrawingData(const QString &filePath);      // 核心数据加载函数
     void setupUi();                                     // UI初始化函数
@@ -141,6 +144,7 @@ private:
     int m_positioningMethod = 0;                        // 保存用户选择的定位方式号，默认为 0
     bool m_isPathPlanned = false;
 
+    QAction *m_setSaveDirAction = nullptr;              // 设置存储相机图片
     VizumCamera *m_camera;
 };
 

@@ -110,3 +110,33 @@ CONFIG(debug, debug|release) {
 } else {
     LIBS += -L$$PWD/libs/Release/ -lVzNLDetect -lVzNLGraphics
 }
+
+# ==============================================================
+# PCL 1.12.1 点云库环境配置
+# ==============================================================
+# 🌟 1. 修改为你电脑上真实的 PCL 安装路径
+PCL_ROOT = D:/PCL_1.12.1
+
+# 🌟 2. 引入 PCL 及其所有第三方巨头库的头文件
+INCLUDEPATH += $$PCL_ROOT/include/pcl-1.12 \
+               $$PCL_ROOT/3rdParty/Boost/include/boost-1_78 \
+               $$PCL_ROOT/3rdParty/Eigen/eigen3 \
+               $$PCL_ROOT/3rdParty/FLANN/include \
+               $$PCL_ROOT/3rdParty/Qhull/include \
+               $$PCL_ROOT/3rdParty/VTK/include/vtk-9.1
+
+# 🌟 3. 指定 .lib 静态链接库所在的目录
+LIBS += -L$$PCL_ROOT/lib \
+        -L$$PCL_ROOT/3rdParty/Boost/lib \
+        -L$$PCL_ROOT/3rdParty/FLANN/lib \
+        -L$$PCL_ROOT/3rdParty/Qhull/lib \
+        -L$$PCL_ROOT/3rdParty/VTK/lib \
+        -L$$PCL_ROOT/3rdParty/OpenNI2/Lib
+
+# 🌟 4. 按需引入 PCL 的核心模块 (为了测试，我们先只引入 common 和 io 模块)
+# Qt 能够自动识别你当前是 Debug 模式还是 Release 模式，自动加载带 'd' 后缀的调试库
+CONFIG(debug, debug|release) {
+    LIBS += -lpcl_commond -lpcl_iod
+} else {
+    LIBS += -lpcl_common -lpcl_io
+}

@@ -112,6 +112,12 @@ MainWindow::MainWindow(QWidget *parent): QMainWindow(parent)
         m_lastIp = "192.168.1.10";
         m_lastPort = 502;
     }
+
+    QString savedPath = settings.value("General/ImageSavePath", "").toString();
+    if (!savedPath.isEmpty() && m_camera != nullptr) {
+        m_camera->setSaveDirectory(savedPath); // 将读取到的路径下发给相机实例
+        qDebug() << "已成功加载 3D 相机历史存储路径：" << savedPath;
+    }
 }
 
 MainWindow::~MainWindow() {
@@ -197,6 +203,8 @@ void MainWindow::setupUi()
     loadAction = new QAction("导入DXF", this);
     loadAction->setIcon(QIcon(":/img/images/dxf.jpg"));
     fileMenu->addAction(loadAction);
+    m_setSaveDirAction = new QAction("设置图片保存路径",this);
+    fileMenu->addAction(m_setSaveDirAction);
 
     m_operationMenu = menuBar()->addMenu("操作");
     rotateAction = new QAction("应用旋转矩阵", this);
@@ -345,6 +353,9 @@ void MainWindow::setupUi()
     connect(m_startBtn, &QPushButton::clicked, this, &MainWindow::onStartClicked);
     connect(m_pauseBtn, &QPushButton::clicked, this, &MainWindow::onPauseClicked);
     connect(m_resetBtn, &QPushButton::clicked, this, &MainWindow::onResetClicked);
+
+    // 相机
+    connect(m_setSaveDirAction,&QAction::triggered,this,&MainWindow::onSetSaveDirTriggered);
 
     resize(1200, 700);
 }
@@ -1272,3 +1283,29 @@ void MainWindow::sendNextWeldHole()
 }
 
 
+// ==========================================
+// 菜单栏：设置图片保存路径
+// ==========================================
+void MainWindow::onSetSaveDirTriggered()
+{
+    QString currentDir = m_camera->getSaveDirectory();
+
+    QString dir = QFileDialog::getExistingDirectory(
+        this,
+        "选择图片及点云的保存目录",
+        currentDir,
+        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks
+        );
+
+    if (!dir.isEmpty()) {
+        // 1. 更新相机的底层路径
+        m_camera->setSaveDirectory(dir);
+
+        // 将路径持久化保存到 config.ini 文件中
+        QString iniPath = QCoreApplication::applicationDirPath() + "/config.ini";
+        QSettings settings(iniPath, QSettings::IniFormat);
+        settings.setValue("General/ImageSavePath", dir);
+
+        QMessageBox::information(this, "设置成功", "保存路径已更新并保存至配置文件:\n" + dir);
+    }
+}
