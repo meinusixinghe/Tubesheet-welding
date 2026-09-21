@@ -17,6 +17,7 @@ SOURCES += \
     modbusmanager.cpp \
     pathplanner.cpp \
     pathplanningdialog.cpp \
+    pointcloudprocessor.cpp \
     renderarea.cpp \
     rotationmatrixdialog.cpp \
     usercoordinatemanager.cpp \
@@ -45,6 +46,7 @@ HEADERS += \
     modbusmanager.h \
     pathplanner.h \
     pathplanningdialog.h \
+    pointcloudprocessor.h \
     renderarea.h \
     rotationmatrixdialog.h \
     usercoordinatemanager.h \
@@ -136,16 +138,31 @@ LIBS += -L$$PCL_ROOT/lib \
 # 🌟 4. 按需引入 PCL 的核心模块 (为了测试，我们先只引入 common 和 io 模块)
 # Qt 能够自动识别你当前是 Debug 模式还是 Release 模式，自动加载带 'd' 后缀的调试库
 CONFIG(debug, debug|release) {
-    LIBS += -lpcl_commond -lpcl_iod
+    LIBS += -lpcl_commond -lpcl_iod -lpcl_visualizationd \
+            -lpcl_filtersd -lpcl_segmentationd -lpcl_sample_consensusd \
+            -lpcl_searchd -lpcl_kdtreed
 } else {
-    LIBS += -lpcl_common -lpcl_io
+    LIBS += -lpcl_common -lpcl_io -lpcl_visualization \
+            -lpcl_filters -lpcl_segmentation -lpcl_sample_consensus \
+            -lpcl_search -lpcl_kdtree
 }
 
 # 🌟 5. 引入 PCL 可视化模块
+VTK_LIB_PATH = $$PCL_ROOT/3rdParty/VTK/lib
+VTK_LIBS_ALL = $$files($$VTK_LIB_PATH/*.lib)
+VTK_LIBS_DEBUG = $$files($$VTK_LIB_PATH/*-gd.lib)
+
+VTK_LIBS_RELEASE = $$VTK_LIBS_ALL
+VTK_LIBS_RELEASE -= $$VTK_LIBS_DEBUG
+
 CONFIG(debug, debug|release) {
-    LIBS += -lpcl_visualizationd
+    for(lib, VTK_LIBS_DEBUG) {
+        LIBS += $$lib
+    }
 } else {
-    LIBS += -lpcl_visualization
+    for(lib, VTK_LIBS_RELEASE) {
+        LIBS += $$lib
+    }
 }
 
 # 🌟 6. 终极绝招：利用 qmake 自动遍历并链接所有的 VTK 静态库，防止 LNK2019 报错

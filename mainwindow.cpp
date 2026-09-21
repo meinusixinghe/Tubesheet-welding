@@ -35,6 +35,7 @@ VTK_MODULE_INIT(vtkRenderingOpenGL2); // 初始化 OpenGL2 渲染后端
 VTK_MODULE_INIT(vtkInteractionStyle); // 初始化鼠标交互模式
 VTK_MODULE_INIT(vtkRenderingFreeType); // 初始化 3D 字体渲染
 #include <vtkObject.h>
+#include "pointcloudprocessor.h"
 
 
 MainWindow::MainWindow(QWidget *parent): QMainWindow(parent)
@@ -1328,45 +1329,62 @@ void MainWindow::onSetSaveDirTriggered()
 // ==========================================
 void MainWindow::onViewPointCloudTriggered()
 {
-    // 1. 弹出文件选择器，默认打开相机设置的保存目录
     QString currentDir = m_camera->getSaveDirectory();
-    QString filePath = QFileDialog::getOpenFileName(this, "选择 3D 点云文件", currentDir, "PCD Files (*.pcd)");
+    QString filePath = QFileDialog::getOpenFileName(this, "选择 3D 点云文件进行分析", currentDir, "PCD Files (*.pcd)");
     if(filePath.isEmpty()) return;
 
-    m_statusLabel->setText("正在加载 3D 点云数据，请稍候...");
-    QApplication::processEvents(); // 刷新UI状态
+    m_statusLabel->setText("正在加载 3D 点云数据...");
+    QApplication::processEvents();
 
-    // 2. 加载 .pcd 点云文件到内存
     pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
     if (pcl::io::loadPCDFile<pcl::PointXYZRGBA>(filePath.toStdString(), *cloud) == -1) {
-        QMessageBox::critical(this, "读取失败", "无法读取 PCD 文件或文件已损坏！");
+        QMessageBox::critical(this, "读取失败", "无法读取 PCD 文件！");
         m_statusLabel->setText("就绪");
         return;
     }
+    m_statusLabel->setText("点云加载完毕，正在运行 3D 智能分析算法...");
+    QApplication::processEvents();
 
-    m_statusLabel->setText(QString("成功加载点云，总点数: %1").arg(cloud->size()));
+    // ==========================================
+    // 🌟 核心：实例化算法类，并执行提取
+    // ==========================================
+    PointCloudProcessor processor;
+    pcl::PointCloud<pcl::PointXYZRGBA>::Ptr baseSurface(new pcl::PointCloud<pcl::PointXYZRGBA>);
+    pcl::PointCloud<pcl::PointXYZRGBA>::Ptr features(new pcl::PointCloud<pcl::PointXYZRGBA>);
+
+    bool ok = processor.extractTubeSheetSurface(cloud, baseSurface, features);
+
+    // 启动 PCL 原生 3D 渲染引擎
     vtkObject::GlobalWarningDisplayOff();
+    pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("管板 3D 智能识别结果"));
+    viewer->setBackgroundColor(0.12, 0.12, 0.12); // 极客深灰背景
 
-    // 3. 启动 PCL 原生 3D 渲染引擎
-    // 注意：这里使用独立的智能指针管理，弹出的将是一个纯正的 3D 视口
-    pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("管板 3D 点云检视器 (PCL Native)"));
+    if (ok) {
+        // 1. 将平坦的母材表面 (Inliers) 渲染为深蓝色
+        pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> blue(baseSurface, 30, 144, 255);
+        viewer->addPointCloud<pcl::PointXYZRGBA>(baseSurface, blue, "base_surface");
+        viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "base_surface");
 
-    // 配置视口背景色 (深灰色，看起来更工业风)
-    viewer->setBackgroundColor(0.15, 0.15, 0.15);
+        // 2. 将凸起的焊缝 (Outliers) 渲染为耀眼的红色
+        pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> red(features, 255, 50, 50);
+        viewer->addPointCloud<pcl::PointXYZRGBA>(features, red, "features");
+        viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 3, "features");
 
-    // 将点云加入渲染器，并设置点的大小为 2
-    viewer->addPointCloud<pcl::PointXYZRGBA>(cloud, "tubesheet_cloud");
-    viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "tubesheet_cloud");
-
-    // 添加 XYZ 三维空间坐标系辅助线 (长度100mm)
-    viewer->addCoordinateSystem(100.0);
-    viewer->initCameraParameters();
-
-    // 4. 渲染循环 (完美融合 Qt 事件流，不卡死主界面)
-    while (!viewer->wasStopped()) {
-        viewer->spinOnce(50); // 渲染器每 50 毫秒刷新一次
-        QApplication::processEvents(); // 将控制权短暂交还给 Qt，保证主窗口按钮仍能响应
+        m_statusLabel->setText(QString("算法分析完成！母材点: %1, 焊缝特征点: %2").arg(baseSurface->size()).arg(features->size()));
+    } else {
+        // 如果算法失败，退回显示原始点云
+        viewer->addPointCloud<pcl::PointXYZRGBA>(cloud, "tubesheet_cloud");
+        m_statusLabel->setText("算法分析失败，显示原始点云。");
     }
 
-    m_statusLabel->setText("3D 检视器已关闭。");
+    viewer->addCoordinateSystem(50.0);
+    viewer->initCameraParameters();
+
+    // 渲染循环
+    while (!viewer->wasStopped()) {
+        viewer->spinOnce(50);
+        QApplication::processEvents();
+    }
+
+    m_statusLabel->setText("3D 分析器已关闭。");
 }
