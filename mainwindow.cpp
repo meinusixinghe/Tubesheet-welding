@@ -1332,7 +1332,8 @@ void MainWindow::onViewPointCloudTriggered()
     m_statusLabel->setText("正在加载 3D 点云数据...");
     QApplication::processEvents();
 
-    pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
+    static pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
+    cloud->points.clear();
     if (pcl::io::loadPCDFile<pcl::PointXYZRGBA>(filePath.toStdString(), *cloud) == -1) {
         QMessageBox::critical(this, "读取失败", "无法读取 PCD 文件！");
         m_statusLabel->setText("就绪");
