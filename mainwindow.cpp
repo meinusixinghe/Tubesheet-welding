@@ -1346,38 +1346,76 @@ void MainWindow::onViewPointCloudTriggered()
     PointCloudProcessor processor;
     pcl::PointCloud<pcl::PointXYZRGBA>::Ptr baseSurface(new pcl::PointCloud<pcl::PointXYZRGBA>);
     pcl::PointCloud<pcl::PointXYZRGBA>::Ptr features(new pcl::PointCloud<pcl::PointXYZRGBA>);
+    std::vector<HoleFeature> detectedHoles;
 
-    bool ok = processor.extractTubeSheetSurface(cloud, baseSurface, features);
+    bool ok = processor.extractTubeSheetSurface(cloud, baseSurface, features, detectedHoles);
 
     QStringList pcdFilesToView;
 
     if (ok) {
         try {
-            qDebug() << ">> [UI 阶段] 准备给母材和特征点云上色...";
+            // 给母材和特征点云上色并保存临时文件...
+            // (你现有的这部分代码完全保持不变)
             for (auto& p : baseSurface->points) { p.r = 30; p.g = 144; p.b = 255; p.a = 255; }
             for (auto& p : features->points)    { p.r = 255; p.g = 50; p.b = 50; p.a = 255; }
 
-            // 🌟 强行修复 PCL 尺寸属性，防止保存时内存越界崩溃
-            baseSurface->width = baseSurface->points.size();
-            baseSurface->height = 1;
-            baseSurface->is_dense = false;
+            baseSurface->width = baseSurface->points.size(); baseSurface->height = 1; baseSurface->is_dense = false;
+            features->width = features->points.size(); features->height = 1; features->is_dense = false;
 
-            features->width = features->points.size();
-            features->height = 1;
-            features->is_dense = false;
-
-            qDebug() << ">> [UI 阶段] 正在保存临时 PCD 文件...";
             QString tempBase = QCoreApplication::applicationDirPath() + "/temp_base.pcd";
             QString tempFeat = QCoreApplication::applicationDirPath() + "/temp_features.pcd";
-
-            // 🌟 关键修复 1：将 toStdString 改为 toLocal8Bit，完美兼容 Windows 路径
-            // 🌟 关键修复 2：改用 ASCII 模式保存，彻底杜绝 Binary 模式的内存 Dump Bug
             pcl::io::savePCDFileASCII(tempBase.toLocal8Bit().constData(), *baseSurface);
             pcl::io::savePCDFileASCII(tempFeat.toLocal8Bit().constData(), *features);
-            qDebug() << ">> [UI 阶段] 临时文件保存成功！";
-
             pcdFilesToView << tempBase << tempFeat;
-            m_statusLabel->setText(QString("算法分析完成！母材点: %1, 焊缝特征点: %2").arg(baseSurface->size()).arg(features->size()));
+            m_statusLabel->setText(QString("分析完成！检出管孔: %1 个").arg(detectedHoles.size()));
+
+            // ==========================================
+            // 关键动作：将 3D 视觉识别出的物理坐标填入 Qt 表格！
+            // ==========================================
+            if (!detectedHoles.empty()) {
+                dataTable->blockSignals(true); // 屏蔽表格信号，防止触发无限循环
+
+                int matchCount = 0;
+                // 遍历 3D 算法算出的每一个真实孔心
+                for (const auto& dh : detectedHoles) {
+                    int bestIdx = -1;
+                    double minDist = 99999.0;
+
+                    // 采用“欧氏距离最近邻算法”，把它和 DXF 导入的孔位进行动态对应
+                    for (int i = 0; i < weldHoles.size(); ++i) {
+                        double dx = weldHoles[i].center.x() - dh.x;
+                        double dy = weldHoles[i].center.y() - dh.y;
+                        double dist = std::sqrt(dx*dx + dy*dy);
+                        if (dist < minDist) {
+                            minDist = dist;
+                            bestIdx = i;
+                        }
+                    }
+
+                    // 如果找到了距离相近的模板孔（假设相机装配导致的位置偏差不超过 20mm）
+                    if (bestIdx != -1 && minDist < 20.0) {
+                        // 1. 将真实的物理 XYZ 坐标覆盖到底层容器中
+                        weldHoles[bestIdx].center3D = QVector3D(dh.x, dh.y, dh.z);
+
+                        // 2. 将数据刷到表格界面的第 3 列 (三维坐标)
+                        QString center3DStr = QString("(%1, %2, %3)")
+                                                  .arg(dh.x, 0, 'f', 2)
+                                                  .arg(dh.y, 0, 'f', 2)
+                                                  .arg(dh.z, 0, 'f', 2);
+
+                        if (dataTable->item(bestIdx, 3)) {
+                            dataTable->item(bestIdx, 3)->setText(center3DStr);
+                            // 标浅绿色表示视觉匹配成功！悬停还能看真实测出的物理半径
+                            dataTable->item(bestIdx, 3)->setBackground(QBrush(QColor(144, 238, 144)));
+                            dataTable->item(bestIdx, 3)->setToolTip(QString("3D 视觉实测半径: %1 mm").arg(dh.radius, 0, 'f', 2));
+                            matchCount++;
+                        }
+                    }
+                }
+                dataTable->blockSignals(false); // 恢复信号
+                QMessageBox::information(this, "识别成功", QString("视觉算法共检出 %1 个孔\n成功匹配并更新了表格中 %2 个孔的 3D 坐标！").arg(detectedHoles.size()).arg(matchCount));
+            }
+
         } catch (const std::exception &e) {
             qDebug() << "❌ [UI 阶段] 保存或上色时发生异常：" << e.what();
             QMessageBox::critical(this, "严重错误", "保存分析结果时发生崩溃！");
