@@ -1512,6 +1512,5 @@ void MainWindow::launchPclViewer(const QString& pcdPath, const QString& pointSiz
     QStringList args;
     args << pcdPath << "-ps" << pointSize << "-bg" << "0.15,0.15,0.15";
 
-    // 🌟 解决 Crash 的第一处：分离式启动，随你怎么关都不报错
     QProcess::startDetached("pcl_viewer.exe", args);
 }
