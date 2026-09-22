@@ -15,6 +15,8 @@
 #include <QCloseEvent>
 #include <QSettings>
 #include "vizumcamera.h"
+#include <QDoubleSpinBox>
+#include <QSpinBox>
 
 class RenderArea;
 class usercoordinatemanager;
@@ -81,6 +83,7 @@ private slots:
 
     // 查看 3D 点云
     void onViewPointCloudTriggered();
+    void launchPclViewer(const QString& pcdPath, const QString& pointSize);
 
 private:
     void loadDrawingData(const QString &filePath);      // 核心数据加载函数
@@ -151,6 +154,12 @@ private:
     VizumCamera *m_camera;
 
     QAction *m_viewPointCloudAction = nullptr;          // 查看点云菜单动作
+
+    QTabWidget* m_rightTabWidget;
+    QDoubleSpinBox* m_ransacThreshSpin;
+    QSpinBox* m_clusterMinSpin;
+    QDoubleSpinBox* m_circleThreshSpin;
+
 };
 
 #endif // MAINWINDOW_H

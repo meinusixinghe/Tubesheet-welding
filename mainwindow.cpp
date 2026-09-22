@@ -32,6 +32,8 @@
 #include <pcl/visualization/pcl_visualizer.h>
 #include <vtkObject.h>
 #include "pointcloudprocessor.h"
+#include <QGroupBox>
+#include <QFormLayout>
 
 
 MainWindow::MainWindow(QWidget *parent): QMainWindow(parent)
@@ -193,6 +195,47 @@ void MainWindow::setupUi()
     dataTable->setColumnCount(4);
     dataTable->setHorizontalHeaderLabels({"ID", "半径", "二维坐标", "三维坐标"});
     dataTable->verticalHeader()->setVisible(false);                                             // 关闭表格行头
+
+    m_rightTabWidget = new QTabWidget(this);
+    m_rightTabWidget->setMinimumSize(250, 400);
+    m_rightTabWidget->addTab(dataTable, "管孔与焊缝数据"); // Tab 1
+
+    // 建立 3D 视觉设置 Tab 2
+    QWidget* visionSettingsWidget = new QWidget();
+    QVBoxLayout* vLayout = new QVBoxLayout(visionSettingsWidget);
+
+    QGroupBox* paramGroup = new QGroupBox("核心算法参数设置");
+    QFormLayout* formLayout = new QFormLayout(paramGroup);
+
+    m_ransacThreshSpin = new QDoubleSpinBox();
+    m_ransacThreshSpin->setRange(0.1, 10.0); m_ransacThreshSpin->setSingleStep(0.1); m_ransacThreshSpin->setValue(1.0);
+    formLayout->addRow("基准面拟合容差 (mm):", m_ransacThreshSpin);
+
+    m_clusterMinSpin = new QSpinBox();
+    m_clusterMinSpin->setRange(10, 1000); m_clusterMinSpin->setValue(150);
+    formLayout->addRow("聚类最小点数 (个):", m_clusterMinSpin);
+
+    m_circleThreshSpin = new QDoubleSpinBox();
+    m_circleThreshSpin->setRange(0.1, 5.0); m_circleThreshSpin->setSingleStep(0.1); m_circleThreshSpin->setValue(0.5);
+    formLayout->addRow("圆拟合紧密度 (mm):", m_circleThreshSpin);
+    vLayout->addWidget(paramGroup);
+
+    QGroupBox* viewGroup = new QGroupBox("算法中间过程检视");
+    QVBoxLayout* viewLayout = new QVBoxLayout(viewGroup);
+    QPushButton* btnOrig = new QPushButton("查看原始(清洗后)点云");
+    QPushButton* btnFilter = new QPushButton("查看 Sor 滤波后点云");
+    QPushButton* btnBase = new QPushButton("仅查看基准面(蓝色)点云");
+    viewLayout->addWidget(btnOrig); viewLayout->addWidget(btnFilter); viewLayout->addWidget(btnBase);
+    vLayout->addWidget(viewGroup);
+    vLayout->addStretch(); // 弹簧把设置项顶在上方
+
+    m_rightTabWidget->addTab(visionSettingsWidget, "3D视觉配置");
+    splitter->addWidget(m_rightTabWidget);
+
+    connect(btnOrig, &QPushButton::clicked, this, [this](){ launchPclViewer(QCoreApplication::applicationDirPath() + "/temp_clean.pcd", "2"); });
+    connect(btnFilter, &QPushButton::clicked, this, [this](){ launchPclViewer(QCoreApplication::applicationDirPath() + "/temp_filtered.pcd", "2"); });
+    connect(btnBase, &QPushButton::clicked, this, [this](){ launchPclViewer(QCoreApplication::applicationDirPath() + "/temp_base.pcd", "3"); });
+
     // 优化表格列宽显示
     dataTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     dataTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
@@ -1348,7 +1391,12 @@ void MainWindow::onViewPointCloudTriggered()
     pcl::PointCloud<pcl::PointXYZRGBA>::Ptr features(new pcl::PointCloud<pcl::PointXYZRGBA>);
     std::vector<HoleFeature> detectedHoles;
 
-    bool ok = processor.extractTubeSheetSurface(cloud, baseSurface, features, detectedHoles);
+    VisionParams params;
+    params.ransacDistanceThresh = m_ransacThreshSpin->value();
+    params.clusterMinSize = m_clusterMinSpin->value();
+    params.circleDistanceThresh = m_circleThreshSpin->value();
+
+    bool ok = processor.extractTubeSheetSurface(cloud, baseSurface, features, detectedHoles, params);
 
     QStringList pcdFilesToView;
 
@@ -1373,6 +1421,22 @@ void MainWindow::onViewPointCloudTriggered()
             // 关键动作：将 3D 视觉识别出的物理坐标填入 Qt 表格！
             // ==========================================
             if (!detectedHoles.empty()) {
+                QString txtPath = m_camera->getSaveDirectory() + "/DetectedHoles3D_" + QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss") + ".txt";
+                QFile txtFile(txtPath);
+                if (txtFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                    QTextStream out(&txtFile);
+                    out << "ID\tX(mm)\t\tY(mm)\t\tZ(mm)\t\tRadius(mm)\n";
+                    int id = 1;
+                    for (const auto& h : detectedHoles) {
+                        out << id++ << "\t"
+                            << QString::number(h.x, 'f', 3) << "\t\t"
+                            << QString::number(h.y, 'f', 3) << "\t\t"
+                            << QString::number(h.z, 'f', 3) << "\t\t"
+                            << QString::number(h.radius, 'f', 3) << "\n";
+                    }
+                    txtFile.close();
+                    qDebug() << ">> 3D孔位物理数据已安全导出至 TXT 文件：" << txtPath;
+                }
                 dataTable->blockSignals(true); // 屏蔽表格信号，防止触发无限循环
 
                 int matchCount = 0;
@@ -1426,20 +1490,28 @@ void MainWindow::onViewPointCloudTriggered()
         m_statusLabel->setText("算法分析失败，仅显示原始点云。");
     }
 
-    qDebug() << ">> [UI 阶段] 准备跨进程唤醒独立 3D 渲染器 (pcl_viewer.exe)...";
-    QProcess *viewerProcess = new QProcess(this);
     QStringList arguments;
-    arguments << pcdFilesToView;
-    arguments << "-ps" << "3";               // 点尺寸放大，看得更清
-    arguments << "-bg" << "0.15,0.15,0.15";  // 极客深灰背景
+    arguments << pcdFilesToView << "-ps" << "3" << "-bg" << "0.15,0.15,0.15";
 
-    // 启动外部看图神器，主程序彻底解耦！
-    viewerProcess->start("pcl_viewer.exe", arguments);
+    qint64 pid; // 用于接收脱离进程的独立 PID
+    bool success = QProcess::startDetached("pcl_viewer.exe", arguments, QCoreApplication::applicationDirPath(), &pid);
 
-    if (!viewerProcess->waitForStarted(2000)) {
-        qDebug() << "❌ [UI 阶段] 唤醒 pcl_viewer.exe 失败！";
-        QMessageBox::warning(this, "渲染器启动失败", "系统找不到 pcl_viewer.exe！\n请检查 C:\\PCL_1.12.1\\bin 是否已加入环境变量 Path。");
+    if (!success) {
+        QMessageBox::warning(this, "渲染器启动失败", "系统找不到 pcl_viewer.exe！");
     } else {
-        qDebug() << ">> [UI 阶段] 独立渲染器唤醒成功！完美收工！";
+        qDebug() << ">> [UI 阶段] 独立渲染器唤醒成功！分配 PID:" << pid << "，完美收工！";
     }
+
+}
+
+void MainWindow::launchPclViewer(const QString& pcdPath, const QString& pointSize) {
+    if (!QFile::exists(pcdPath)) {
+        QMessageBox::warning(this, "文件不存在", "未找到对应的过程文件，请先执行一次 3D 分析！");
+        return;
+    }
+    QStringList args;
+    args << pcdPath << "-ps" << pointSize << "-bg" << "0.15,0.15,0.15";
+
+    // 🌟 解决 Crash 的第一处：分离式启动，随你怎么关都不报错
+    QProcess::startDetached("pcl_viewer.exe", args);
 }

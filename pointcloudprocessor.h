@@ -12,6 +12,12 @@ struct HoleFeature {
     float radius;
 };
 
+struct VisionParams {
+    double ransacDistanceThresh = 1.0;  // 基准面拟合容差
+    int clusterMinSize = 150;           // 聚类最小点数
+    double circleDistanceThresh = 0.5;  // 圆拟合紧密度
+};
+
 class PointCloudProcessor
 {
 public:
@@ -21,7 +27,8 @@ public:
     bool extractTubeSheetSurface(pcl::PointCloud<pcl::PointXYZRGBA>::Ptr inputCloud,
                                  pcl::PointCloud<pcl::PointXYZRGBA>::Ptr &baseSurfaceCloud,
                                  pcl::PointCloud<pcl::PointXYZRGBA>::Ptr &featureCloud,
-                                 std::vector<HoleFeature> &detectedHoles);
+                                 std::vector<HoleFeature> &detectedHoles,
+                                 const VisionParams& params);
 };
 
 #endif // POINTCLOUDPROCESSOR_H
