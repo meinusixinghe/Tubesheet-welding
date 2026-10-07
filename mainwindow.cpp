@@ -1583,15 +1583,24 @@ void MainWindow::onViewPointCloudTriggered()
     QStringList arguments;
     arguments << pcdFilesToView << "-ps" << "3" << "-bg" << "0.15,0.15,0.15";
 
-    qint64 pid; // 用于接收脱离进程的独立 PID
-    bool success = QProcess::startDetached("pcl_viewer.exe", arguments, QCoreApplication::applicationDirPath(), &pid);
+    QProcess* viewerProcess = new QProcess(this);
+    viewerProcess->setProgram("pcl_viewer.exe");
+    viewerProcess->setArguments(arguments);
+    viewerProcess->setWorkingDirectory(QCoreApplication::applicationDirPath());
+
+    // 强制屏蔽外部程序的烦人日志，还 Qt 控制台一个清净
+    viewerProcess->setStandardOutputFile(QProcess::nullDevice());
+    viewerProcess->setStandardErrorFile(QProcess::nullDevice());
+
+    qint64 pid;
+    bool success = viewerProcess->startDetached(&pid);
+    viewerProcess->deleteLater();
 
     if (!success) {
         QMessageBox::warning(this, "渲染器启动失败", "系统找不到 pcl_viewer.exe！");
     } else {
         qDebug() << ">> [UI 阶段] 独立渲染器唤醒成功！分配 PID:" << pid << "，完美收工！";
     }
-
 }
 
 void MainWindow::launchPclViewer(const QString& pcdPath, const QString& pointSize) {
@@ -1602,5 +1611,15 @@ void MainWindow::launchPclViewer(const QString& pcdPath, const QString& pointSiz
     QStringList args;
     args << pcdPath << "-ps" << pointSize << "-bg" << "0.15,0.15,0.15";
 
-    QProcess::startDetached("pcl_viewer.exe", args);
+    QProcess* viewerProcess = new QProcess(this);
+    viewerProcess->setProgram("pcl_viewer.exe");
+    viewerProcess->setArguments(args);
+
+    // 将标准输出和标准错误全部重定向到“空设备”（彻底屏蔽日志）
+    viewerProcess->setStandardOutputFile(QProcess::nullDevice());
+    viewerProcess->setStandardErrorFile(QProcess::nullDevice());
+
+    // 开启分离模式，保证关闭主界面时它不崩溃
+    viewerProcess->startDetached();
+    viewerProcess->deleteLater(); // 启动后安全释放自身内存
 }
