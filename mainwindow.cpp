@@ -1437,6 +1437,41 @@ void MainWindow::onViewPointCloudTriggered()
                     txtFile.close();
                     qDebug() << ">> 3D孔位物理数据已安全导出至 TXT 文件：" << txtPath;
                 }
+
+                pcl::PointCloud<pcl::PointXYZRGBA>::Ptr centersCloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
+
+                for (const auto& dh : detectedHoles) {
+                    // 1. 在圆心位置画一个“亮绿色”的 3D 十字星 (臂长 5mm)
+                    for (float d = -5.0f; d <= 5.0f; d += 0.2f) {
+                        pcl::PointXYZRGBA pX, pY, pZ;
+                        pX.x = dh.x + d; pX.y = dh.y;     pX.z = dh.z + 0.5f; // Z轴稍微抬高0.5mm，防止被蓝色母材遮挡埋在地里
+                        pY.x = dh.x;     pY.y = dh.y + d; pY.z = dh.z + 0.5f;
+                        pZ.x = dh.x;     pZ.y = dh.y;     pZ.z = dh.z + d + 0.5f;
+
+                        // 设为纯绿色 (0, 255, 0)
+                        pX.r = pY.r = pZ.r = 0; pX.g = pY.g = pZ.g = 255; pX.b = pY.b = pZ.b = 0; pX.a = pY.a = pZ.a = 255;
+                        centersCloud->points.push_back(pX); centersCloud->points.push_back(pY); centersCloud->points.push_back(pZ);
+                    }
+
+                    // 2. 将数学拟合出的完美圆环画出来 (设为亮黄色)
+                    for (float angle = 0; angle < 2 * M_PI; angle += 0.05f) {
+                        pcl::PointXYZRGBA pRing;
+                        pRing.x = dh.x + dh.radius * std::cos(angle);
+                        pRing.y = dh.y + dh.radius * std::sin(angle);
+                        pRing.z = dh.z + 0.5f;
+
+                        // 设为亮黄色 (255, 255, 0)
+                        pRing.r = 255; pRing.g = 255; pRing.b = 0; pRing.a = 255;
+                        centersCloud->points.push_back(pRing);
+                    }
+                }
+                centersCloud->width = centersCloud->points.size();
+                centersCloud->height = 1;
+                centersCloud->is_dense = false;
+                QString tempCenters = QCoreApplication::applicationDirPath() + "/temp_centers.pcd";
+                pcl::io::savePCDFileASCII(tempCenters.toLocal8Bit().constData(), *centersCloud);
+                pcdFilesToView << tempCenters;
+
                 dataTable->blockSignals(true); // 屏蔽表格信号，防止触发无限循环
 
                 int matchCount = 0;

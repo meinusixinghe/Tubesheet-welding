@@ -116,10 +116,10 @@ CONFIG(debug, debug|release) {
 # ==============================================================
 # PCL 1.12.1 点云库环境配置
 # ==============================================================
-# 🌟 1. 修改为你电脑上真实的 PCL 安装路径
+# 1. 修改为你电脑上真实的 PCL 安装路径
 PCL_ROOT = D:/PCL_1.12.1
 
-# 🌟 2. 引入 PCL 及其所有第三方巨头库的头文件
+# 2. 引入 PCL 及其所有第三方巨头库的头文件
 INCLUDEPATH += $$PCL_ROOT/include/pcl-1.12 \
                $$PCL_ROOT/3rdParty/Boost/include/boost-1_78 \
                $$PCL_ROOT/3rdParty/Eigen/eigen3 \
@@ -127,7 +127,7 @@ INCLUDEPATH += $$PCL_ROOT/include/pcl-1.12 \
                $$PCL_ROOT/3rdParty/Qhull/include \
                $$PCL_ROOT/3rdParty/VTK/include/vtk-9.1
 
-# 🌟 3. 指定 .lib 静态链接库所在的目录
+# 3. 指定 .lib 静态链接库所在的目录
 LIBS += -L$$PCL_ROOT/lib \
         -L$$PCL_ROOT/3rdParty/Boost/lib \
         -L$$PCL_ROOT/3rdParty/FLANN/lib \
@@ -135,19 +135,19 @@ LIBS += -L$$PCL_ROOT/lib \
         -L$$PCL_ROOT/3rdParty/VTK/lib \
         -L$$PCL_ROOT/3rdParty/OpenNI2/Lib
 
-# 🌟 4. 按需引入 PCL 的核心模块 (为了测试，我们先只引入 common 和 io 模块)
+# 4. 按需引入 PCL 的核心模块 (为了测试，我们先只引入 common 和 io 模块)
 # Qt 能够自动识别你当前是 Debug 模式还是 Release 模式，自动加载带 'd' 后缀的调试库
 CONFIG(debug, debug|release) {
     LIBS += -lpcl_commond -lpcl_iod -lpcl_visualizationd \
             -lpcl_filtersd -lpcl_segmentationd -lpcl_sample_consensusd \
-            -lpcl_searchd -lpcl_kdtreed
+            -lpcl_searchd -lpcl_kdtreed -lpcl_featuresd
 } else {
     LIBS += -lpcl_common -lpcl_io -lpcl_visualization \
             -lpcl_filters -lpcl_segmentation -lpcl_sample_consensus \
-            -lpcl_search -lpcl_kdtree
+            -lpcl_search -lpcl_kdtree -lpcl_features
 }
 
-# 🌟 5. 引入 PCL 可视化模块
+# 5. 引入 PCL 可视化模块
 VTK_LIB_PATH = $$PCL_ROOT/3rdParty/VTK/lib
 VTK_LIBS_ALL = $$files($$VTK_LIB_PATH/*.lib)
 VTK_LIBS_DEBUG = $$files($$VTK_LIB_PATH/*-gd.lib)
@@ -165,7 +165,7 @@ CONFIG(debug, debug|release) {
     }
 }
 
-# 🌟 6. 终极绝招：利用 qmake 自动遍历并链接所有的 VTK 静态库，防止 LNK2019 报错
+# 6. 终极绝招：利用 qmake 自动遍历并链接所有的 VTK 静态库，防止 LNK2019 报错
 VTK_LIB_PATH = $$PCL_ROOT/3rdParty/VTK/lib
 VTK_LIBS_ALL = $$files($$VTK_LIB_PATH/*.lib)
 VTK_LIBS_DEBUG = $$files($$VTK_LIB_PATH/*-gd.lib)
