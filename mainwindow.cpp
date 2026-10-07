@@ -34,7 +34,10 @@
 #include "pointcloudprocessor.h"
 #include <QGroupBox>
 #include <QFormLayout>
+#include <vtkAutoInit.h>
 
+
+VTK_MODULE_INIT(vtkRenderingContextOpenGL2);    // 解决 PCL报 vtkContextDevice2D警告。初始化
 
 MainWindow::MainWindow(QWidget *parent): QMainWindow(parent)
 {

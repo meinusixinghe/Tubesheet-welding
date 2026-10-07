@@ -145,18 +145,39 @@ bool PointCloudProcessor::extractTubeSheetSurface(pcl::PointCloud<pcl::PointXYZR
                 circle_seg->setMethodType(pcl::SAC_RANSAC);
                 circle_seg->setMaxIterations(2000);
                 circle_seg->setDistanceThreshold(params.circleDistanceThresh);
-                // 🌟 新增硬性约束：强制要求找出的圆半径必须在 6mm 到 15mm 之间 (对应直径 12-30孔)
-                circle_seg->setRadiusLimits(6.0, 15.0);
+                // 限制物理半径：你的大孔 25(r=12.5)，小孔 15(r=7.5)。放宽一点允许范围 6.0 ~ 14.0
+                circle_seg->setRadiusLimits(6.0, 14.0);
                 circle_seg->setInputCloud(cloud_cluster);
                 circle_seg->segment(*circle_inliers, *circle_coeff);
                 delete circle_seg;
 
                 if (!circle_inliers->indices.empty() && circle_coeff->values.size() >= 4) {
                     HoleFeature h;
-                    h.x = circle_coeff->values[0]; h.y = circle_coeff->values[1];
-                    h.z = circle_coeff->values[2]; h.radius = circle_coeff->values[3];
-                    // 再次兜底过滤
-                    if (h.radius >= 6.0 && h.radius <= 15.0) detectedHoles.push_back(h);
+                    h.x = circle_coeff->values[0];
+                    h.y = circle_coeff->values[1];
+                    h.z = circle_coeff->values[2];
+                    h.radius = circle_coeff->values[3];
+
+                    // 🌟 核心算法升级：象限覆盖率检验 (过滤外边缘倒角伪影)
+                    int quadrants[4] = {0, 0, 0, 0};
+                    for (const auto& idx : circle_inliers->indices) {
+                        const auto& pt = cloud_cluster->points[idx];
+                        float dx = pt.x - h.x;
+                        float dy = pt.y - h.y;
+                        if (dx >= 0 && dy >= 0) quadrants[0]++;
+                        else if (dx < 0 && dy >= 0) quadrants[1]++;
+                        else if (dx < 0 && dy < 0) quadrants[2]++;
+                        else if (dx >= 0 && dy < 0) quadrants[3]++;
+                    }
+                    // 统计有多少个象限包含超过 5 个点
+                    int filledQuadrants = (quadrants[0]>5) + (quadrants[1]>5) + (quadrants[2]>5) + (quadrants[3]>5);
+
+                    // 🌟 终极裁决：必须是闭合的圆（占满至少 3 个象限），且半径合法
+                    if (filledQuadrants >= 3 && h.radius >= 6.0 && h.radius <= 14.0) {
+                        detectedHoles.push_back(h);
+                    } else {
+                        qDebug() << "   -> 剔除无效伪圆特征：算得半径" << h.radius << "mm, 闭合象限数仅为" << filledQuadrants;
+                    }
                 }
             }
         }
