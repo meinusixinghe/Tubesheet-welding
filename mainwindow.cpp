@@ -143,13 +143,15 @@ void MainWindow::setupUi()
     QSplitter *splitter = new QSplitter(Qt::Horizontal, this);                                  // 水平分割器
     setCentralWidget(splitter);
 
+    // ==========================================
     // 1. 先创建左侧：渲染区域 (RenderArea)
+    // ==========================================
     renderArea = new RenderArea(this);
     renderArea->setMinimumSize(800, 400);
     renderArea->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     splitter->addWidget(renderArea);
 
-    // 显示/隐藏用户坐标系
+    // 显示/隐藏用户坐标系等悬浮按钮
     QVBoxLayout* overlayLayout = new QVBoxLayout(renderArea);
     overlayLayout->setContentsMargins(15, 15, 15, 15);
     overlayLayout->addStretch();
@@ -161,12 +163,12 @@ void MainWindow::setupUi()
     m_toggleCoordBtn->setVisible(false);                                                        // 初始不可见
     m_toggleCoordBtn->setMinimumWidth(120);                                                     // 按钮最小宽度，避免文字挤压
     m_toggleCoordBtn->setCursor(Qt::ArrowCursor);
-    QString btnStyle = R"(
+    QString btnStyleCoord = R"(
         QPushButton { padding: 6px 12px; background-color: rgba(255, 255, 255, 0.95); border: 1px solid #ccc; border-radius: 4px;}
         QPushButton:checked { background-color: #2196F3; color: white; border-color: #2196F3;}
         QPushButton:hover {border-color: #2196F3; }
     )";
-    m_toggleCoordBtn->setStyleSheet(btnStyle);
+    m_toggleCoordBtn->setStyleSheet(btnStyleCoord);
 
     bottomBtnLayout->addWidget(m_toggleCoordBtn);
 
@@ -192,18 +194,51 @@ void MainWindow::setupUi()
     bottomBtnLayout->addStretch();
     overlayLayout->addLayout(bottomBtnLayout);
 
-    // 2. 后创建右侧：数据表格 (TableWidget)
+    // ==========================================
+    // 2. 后创建右侧：导航切换按键 + 堆叠窗口
+    // ==========================================
+    QWidget* rightPanel = new QWidget(this);
+    QVBoxLayout* rightLayout = new QVBoxLayout(rightPanel);
+    rightLayout->setContentsMargins(0, 0, 0, 0);
+
+    // 2.1 顶部导航按键栏
+    QHBoxLayout* navLayout = new QHBoxLayout();
+    m_btnShowTable = new QPushButton("管孔与焊缝数据", this);
+    m_btnShowConfig = new QPushButton("3D视觉配置", this);
+    m_btnShowTable->setMinimumHeight(30);
+    m_btnShowConfig->setMinimumHeight(30);
+
+    // 工业级导航栏 QSS 样式
+    QString navBtnStyle = "QPushButton { font-weight: bold; background-color: #f0f0f0; border: 1px solid #ccc; border-radius: 4px; }"
+                          "QPushButton:hover { background-color: #e0e0e0; }"
+                          "QPushButton:checked { background-color: #d0e8f2; border: 1px solid #0078d7; color: #0078d7; }";
+    m_btnShowTable->setStyleSheet(navBtnStyle);
+    m_btnShowTable->setCheckable(true);
+    m_btnShowTable->setChecked(true); // 默认选中表格
+    m_btnShowConfig->setStyleSheet(navBtnStyle);
+    m_btnShowConfig->setCheckable(true);
+
+    navLayout->addWidget(m_btnShowTable);
+    navLayout->addWidget(m_btnShowConfig);
+    rightLayout->addLayout(navLayout);
+
+    // 2.2 底部堆叠内容区 (QStackedWidget)
+    m_rightStacked = new QStackedWidget(this);
+    m_rightStacked->setMinimumSize(250, 400);
+
+    // --- 第 0 页：管孔数据表格 ---
     dataTable = new QTableWidget(this);
-    dataTable->setMinimumSize(200,400);
     dataTable->setColumnCount(4);
     dataTable->setHorizontalHeaderLabels({"ID", "半径", "二维坐标", "三维坐标"});
     dataTable->verticalHeader()->setVisible(false);                                             // 关闭表格行头
+    // 优化表格列宽显示
+    dataTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    dataTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    dataTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    dataTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
+    m_rightStacked->addWidget(dataTable); // 索引 0
 
-    m_rightTabWidget = new QTabWidget(this);
-    m_rightTabWidget->setMinimumSize(250, 400);
-    m_rightTabWidget->addTab(dataTable, "管孔与焊缝数据"); // Tab 1
-
-    // 建立 3D 视觉设置 Tab 2
+    // --- 第 1 页：3D 视觉设置面板 ---
     QWidget* visionSettingsWidget = new QWidget();
     QVBoxLayout* vLayout = new QVBoxLayout(visionSettingsWidget);
 
@@ -215,7 +250,7 @@ void MainWindow::setupUi()
     formLayout->addRow("基准面拟合容差 (mm):", m_ransacThreshSpin);
 
     m_clusterMinSpin = new QSpinBox();
-    m_clusterMinSpin->setRange(10, 1000); m_clusterMinSpin->setValue(150);
+    m_clusterMinSpin->setRange(10, 1000); m_clusterMinSpin->setValue(30); // 调整为30适配线状边界
     formLayout->addRow("聚类最小点数 (个):", m_clusterMinSpin);
 
     m_circleThreshSpin = new QDoubleSpinBox();
@@ -225,33 +260,45 @@ void MainWindow::setupUi()
 
     QGroupBox* viewGroup = new QGroupBox("算法中间过程检视");
     QVBoxLayout* viewLayout = new QVBoxLayout(viewGroup);
-    QPushButton* btnOrig = new QPushButton("查看原始(清洗后)点云");
-    QPushButton* btnFilter = new QPushButton("查看 Sor 滤波后点云");
-    QPushButton* btnBase = new QPushButton("仅查看基准面(蓝色)点云");
+    QPushButton* btnOrig = new QPushButton("1. 查看原始(清洗后)点云");
+    QPushButton* btnFilter = new QPushButton("2. 查看 Sor 滤波后点云");
+    QPushButton* btnBase = new QPushButton("3. 仅查看基准面(蓝色)点云");
     viewLayout->addWidget(btnOrig); viewLayout->addWidget(btnFilter); viewLayout->addWidget(btnBase);
     vLayout->addWidget(viewGroup);
     vLayout->addStretch(); // 弹簧把设置项顶在上方
 
-    m_rightTabWidget->addTab(visionSettingsWidget, "3D视觉配置");
-    splitter->addWidget(m_rightTabWidget);
+    m_rightStacked->addWidget(visionSettingsWidget); // 索引 1
+
+    // 将堆叠窗口加入右侧主布局，再将右侧主面板加入全局分割器
+    rightLayout->addWidget(m_rightStacked);
+    splitter->addWidget(rightPanel);
+
+    // 2.3 绑定按键切换逻辑与过程查看逻辑
+    connect(m_btnShowTable, &QPushButton::clicked, this, [this](){
+        m_rightStacked->setCurrentIndex(0);
+        m_btnShowTable->setChecked(true);
+        m_btnShowConfig->setChecked(false);
+    });
+    connect(m_btnShowConfig, &QPushButton::clicked, this, [this](){
+        m_rightStacked->setCurrentIndex(1);
+        m_btnShowConfig->setChecked(true);
+        m_btnShowTable->setChecked(false);
+    });
 
     connect(btnOrig, &QPushButton::clicked, this, [this](){ launchPclViewer(QCoreApplication::applicationDirPath() + "/temp_clean.pcd", "2"); });
     connect(btnFilter, &QPushButton::clicked, this, [this](){ launchPclViewer(QCoreApplication::applicationDirPath() + "/temp_filtered.pcd", "2"); });
     connect(btnBase, &QPushButton::clicked, this, [this](){ launchPclViewer(QCoreApplication::applicationDirPath() + "/temp_base.pcd", "3"); });
 
-    // 优化表格列宽显示
-    dataTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    dataTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    dataTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
-    dataTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
-    splitter->addWidget(dataTable);                                                             // 添加到分割器右侧
-
+    // ==========================================
     // 3. 设置初始比例：左侧占 3份，右侧占 1份
+    // ==========================================
     splitter->setCollapsible(0, false);
     splitter->setStretchFactor(0, 3);
     splitter->setStretchFactor(1, 1);
 
+    // ==========================================
     // 4. 创建菜单栏
+    // ==========================================
     fileMenu = menuBar()->addMenu("文件");
     loadAction = new QAction("导入DXF", this);
     loadAction->setIcon(QIcon(":/img/images/dxf.jpg"));
@@ -283,7 +330,9 @@ void MainWindow::setupUi()
     m_connectAction->setIcon(QIcon(":/img/images/icons6.png"));
     m_connectMenu->addAction(m_connectAction);
 
+    // ==========================================
     // 5. 创建工具栏
+    // ==========================================
     toolBar = addToolBar("工具栏");
     toolBar->setIconSize(QSize(32, 32));                                                        // 设置工具栏图标统一大小
     toolBar->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);                                   // 设置工具栏按钮样式为文字在图标下方
@@ -292,7 +341,9 @@ void MainWindow::setupUi()
     toolBar->addAction(m_manageProcessAction);
     toolBar->addSeparator();                                                                    // 加分隔符，和原有工具栏内容区分
 
-    // 6. 状态标签
+    // ==========================================
+    // 6. 状态标签与网络监测区
+    // ==========================================
     m_statusLabel = new QLabel("就绪", this);
     statusBar()->addWidget(m_statusLabel);
 
@@ -363,7 +414,7 @@ void MainWindow::setupUi()
     statusLayout->addWidget(m_autoTextLabel);
     toolBar->addWidget(statusContainer);
 
-    // 1. 创建弹簧 Widget，利用 Expanding 策略撑开剩余空间
+    // 创建弹簧 Widget，利用 Expanding 策略撑开剩余空间
     QWidget *spacer = new QWidget(this);
     spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     toolBar->addWidget(spacer);
@@ -377,12 +428,13 @@ void MainWindow::setupUi()
         QMessageBox::warning(this, "相机错误", msg);
     });
 
-
+    // ==========================================
+    // 7. 信号槽绑定与最终初始化
+    // ==========================================
     // 初始化坐标管理器
     m_coordManager = new usercoordinatemanager(this);
     m_coordManager->initialize(renderArea, dataTable, weldHoles, mainPlateHole, m_statusLabel);
 
-    // 信号槽连接
     connect(loadAction, &QAction::triggered, this, &MainWindow::importDxf);                 // 导入DXF → 触发importDxf函数
     connect(dataTable->selectionModel(), &QItemSelectionModel::currentRowChanged,
             this, &MainWindow::handleTableSelectionChanged);                                // 表格选中行变化 → 处理选中逻辑
@@ -410,7 +462,7 @@ void MainWindow::setupUi()
     connect(m_pauseBtn, &QPushButton::clicked, this, &MainWindow::onPauseClicked);
     connect(m_resetBtn, &QPushButton::clicked, this, &MainWindow::onResetClicked);
 
-    // 相机
+    // 相机保存路径
     connect(m_setSaveDirAction,&QAction::triggered,this,&MainWindow::onSetSaveDirTriggered);
 
     resize(1200, 700);

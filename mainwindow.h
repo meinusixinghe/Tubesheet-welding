@@ -17,6 +17,7 @@
 #include "vizumcamera.h"
 #include <QDoubleSpinBox>
 #include <QSpinBox>
+#include <QStackedWidget>
 
 class RenderArea;
 class usercoordinatemanager;
@@ -155,7 +156,10 @@ private:
 
     QAction *m_viewPointCloudAction = nullptr;          // 查看点云菜单动作
 
-    QTabWidget* m_rightTabWidget;
+    QStackedWidget* m_rightStacked;                     // 替换为堆叠窗口（即右侧可切换）
+    QPushButton* m_btnShowTable;                        // 表格显示
+    QPushButton* m_btnShowConfig;                       // 点云配置显示
+
     QDoubleSpinBox* m_ransacThreshSpin;
     QSpinBox* m_clusterMinSpin;
     QDoubleSpinBox* m_circleThreshSpin;
