@@ -1589,8 +1589,9 @@ void MainWindow::onViewPointCloudTriggered()
     viewerProcess->setWorkingDirectory(QCoreApplication::applicationDirPath());
 
     // 强制屏蔽外部程序的烦人日志，还 Qt 控制台一个清净
-    viewerProcess->setStandardOutputFile(QProcess::nullDevice());
-    viewerProcess->setStandardErrorFile(QProcess::nullDevice());
+    QString logPath = QCoreApplication::applicationDirPath() + "/pcl_viewer_silent.log";
+    viewerProcess->setStandardOutputFile(logPath);
+    viewerProcess->setStandardErrorFile(logPath);
 
     qint64 pid;
     bool success = viewerProcess->startDetached(&pid);
@@ -1616,8 +1617,9 @@ void MainWindow::launchPclViewer(const QString& pcdPath, const QString& pointSiz
     viewerProcess->setArguments(args);
 
     // 将标准输出和标准错误全部重定向到“空设备”（彻底屏蔽日志）
-    viewerProcess->setStandardOutputFile(QProcess::nullDevice());
-    viewerProcess->setStandardErrorFile(QProcess::nullDevice());
+    QString logPath = QCoreApplication::applicationDirPath() + "/pcl_viewer_silent.log";
+    viewerProcess->setStandardOutputFile(logPath);
+    viewerProcess->setStandardErrorFile(logPath);
 
     // 开启分离模式，保证关闭主界面时它不崩溃
     viewerProcess->startDetached();

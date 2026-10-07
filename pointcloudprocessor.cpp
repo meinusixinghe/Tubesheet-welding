@@ -76,7 +76,7 @@ bool PointCloudProcessor::extractTubeSheetSurface(pcl::PointCloud<pcl::PointXYZR
         baseSurfaceCloud->width = baseSurfaceCloud->points.size(); baseSurfaceCloud->height = 1; baseSurfaceCloud->is_dense = true;
 
         // ==========================================
-        // 🌟 4. 核心工艺替换：在蓝色母材上计算法向量与孔洞边界！
+        // 4. 核心工艺替换：在蓝色母材上计算法向量与孔洞边界！
         // ==========================================
         qDebug() << ">> 正在计算母材表面法向量与物理边界...";
         pcl::search::KdTree<pcl::PointXYZRGBA>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGBA>());
@@ -101,7 +101,7 @@ bool PointCloudProcessor::extractTubeSheetSurface(pcl::PointCloud<pcl::PointXYZR
         est->compute(*boundaries);
         delete est;
 
-        // 4.3 🌟 将纯粹的边缘轮廓点，塞入红色的 featureCloud 中！
+        // 4.3 将纯粹的边缘轮廓点，塞入红色的 featureCloud 中！
         for (size_t i = 0; i < baseSurfaceCloud->points.size(); ++i) {
             if (boundaries->points[i].boundary_point > 0) {
                 featureCloud->points.push_back(baseSurfaceCloud->points[i]);
@@ -119,7 +119,6 @@ bool PointCloudProcessor::extractTubeSheetSurface(pcl::PointCloud<pcl::PointXYZR
             std::vector<pcl::PointIndices> cluster_indices;
             pcl::EuclideanClusterExtraction<pcl::PointXYZRGBA> *ec = new pcl::EuclideanClusterExtraction<pcl::PointXYZRGBA>();
             ec->setClusterTolerance(3.0);
-            // 🌟 注意：因为现在只有细细的一圈轮廓点，点数很少，不能用 150 了！必须改用较小的值
             ec->setMinClusterSize(30);
             ec->setMaxClusterSize(5000);
             ec->setSearchMethod(tree_cluster);
@@ -158,7 +157,7 @@ bool PointCloudProcessor::extractTubeSheetSurface(pcl::PointCloud<pcl::PointXYZR
                     h.z = circle_coeff->values[2];
                     h.radius = circle_coeff->values[3];
 
-                    // 🌟 核心算法升级：象限覆盖率检验 (过滤外边缘倒角伪影)
+                    // 核心算法升级：象限覆盖率检验 (过滤外边缘倒角伪影)
                     int quadrants[4] = {0, 0, 0, 0};
                     for (const auto& idx : circle_inliers->indices) {
                         const auto& pt = cloud_cluster->points[idx];
@@ -172,7 +171,7 @@ bool PointCloudProcessor::extractTubeSheetSurface(pcl::PointCloud<pcl::PointXYZR
                     // 统计有多少个象限包含超过 5 个点
                     int filledQuadrants = (quadrants[0]>5) + (quadrants[1]>5) + (quadrants[2]>5) + (quadrants[3]>5);
 
-                    // 🌟 终极裁决：必须是闭合的圆（占满至少 3 个象限），且半径合法
+                    // 终极裁决：必须是闭合的圆（占满至少 3个象限），且半径合法
                     if (filledQuadrants >= 3 && h.radius >= 6.0 && h.radius <= 14.0) {
                         detectedHoles.push_back(h);
                     } else {
