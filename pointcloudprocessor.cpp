@@ -68,15 +68,48 @@ bool PointCloudProcessor::extractTubeSheetSurface(pcl::PointCloud<pcl::PointXYZR
         delete seg;
         if (inliers->indices.empty()) return false;
 
-        // 将平坦母材提取到 baseSurfaceCloud
+        // 将平坦母材初步提取到 baseSurfaceCloud
         baseSurfaceCloud->points.reserve(inliers->indices.size());
         for (int idx : inliers->indices) {
             baseSurfaceCloud->points.push_back(cloud_filtered->points[idx]);
         }
         baseSurfaceCloud->width = baseSurfaceCloud->points.size(); baseSurfaceCloud->height = 1; baseSurfaceCloud->is_dense = true;
 
+        // ==============================================================
+        // 最大连通域分析（彻底清除基准面外的游离同高度噪点）
+        // ==============================================================
+        if (!baseSurfaceCloud->points.empty()) {
+            pcl::search::KdTree<pcl::PointXYZRGBA>::Ptr tree_base(new pcl::search::KdTree<pcl::PointXYZRGBA>);
+            tree_base->setInputCloud(baseSurfaceCloud);
+
+            std::vector<pcl::PointIndices> base_cluster_indices;
+            pcl::EuclideanClusterExtraction<pcl::PointXYZRGBA> ec_base;
+            ec_base.setClusterTolerance(2.0); // 设置 5mm，切断游离孤岛
+            ec_base.setMinClusterSize(500);   // 太小的碎片直接不要
+            ec_base.setMaxClusterSize(baseSurfaceCloud->points.size());
+            ec_base.setSearchMethod(tree_base);
+            ec_base.setInputCloud(baseSurfaceCloud);
+            ec_base.extract(base_cluster_indices);
+
+            if (!base_cluster_indices.empty()) {
+                pcl::PointCloud<pcl::PointXYZRGBA>::Ptr largest_base_cluster(new pcl::PointCloud<pcl::PointXYZRGBA>);
+                // [0] 就是包含点数最多的聚类，必然是管板本体
+                for (const auto& idx : base_cluster_indices[0].indices) {
+                    largest_base_cluster->points.push_back(baseSurfaceCloud->points[idx]);
+                }
+                largest_base_cluster->width = largest_base_cluster->points.size();
+                largest_base_cluster->height = 1;
+                largest_base_cluster->is_dense = true;
+
+                // 狸猫换太子：用净化的点云覆盖掉原来的点云
+                *baseSurfaceCloud = *largest_base_cluster;
+                qDebug() << "   -> [净化] 已通过连通域分析剔除游离噪点，锁定纯净管板本体，剩余点数：" << baseSurfaceCloud->points.size();
+            }
+        }
+        // ==============================================================
+
         // ==========================================
-        // 4. 核心工艺替换：在蓝色母材上计算法向量与孔洞边界！
+        // 4. 核心工艺替换：在纯净的蓝色母材上计算法向量与孔洞边界！
         // ==========================================
         qDebug() << ">> 正在计算母材表面法向量与物理边界...";
         pcl::search::KdTree<pcl::PointXYZRGBA>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGBA>());
@@ -144,7 +177,7 @@ bool PointCloudProcessor::extractTubeSheetSurface(pcl::PointCloud<pcl::PointXYZR
                 circle_seg->setMethodType(pcl::SAC_RANSAC);
                 circle_seg->setMaxIterations(2000);
                 circle_seg->setDistanceThreshold(params.circleDistanceThresh);
-                // 限制物理半径：你的大孔 25(r=12.5)，小孔 15(r=7.5)。放宽一点允许范围 6.0 ~ 14.0
+                // 限制物理半径：放宽一点允许范围 6.0 ~ 14.0
                 circle_seg->setRadiusLimits(6.0, 14.0);
                 circle_seg->setInputCloud(cloud_cluster);
                 circle_seg->segment(*circle_inliers, *circle_coeff);
