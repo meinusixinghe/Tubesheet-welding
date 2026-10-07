@@ -85,6 +85,7 @@ private slots:
     // 查看 3D 点云
     void onViewPointCloudTriggered();
     void launchPclViewer(const QString& pcdPath, const QString& pointSize);
+    void launchPclViewer(const QStringList& pcdPaths, const QString& pointSize);
 
 private:
     void loadDrawingData(const QString &filePath);      // 核心数据加载函数

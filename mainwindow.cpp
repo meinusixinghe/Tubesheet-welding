@@ -260,10 +260,14 @@ void MainWindow::setupUi()
 
     QGroupBox* viewGroup = new QGroupBox("算法中间过程检视");
     QVBoxLayout* viewLayout = new QVBoxLayout(viewGroup);
-    QPushButton* btnOrig = new QPushButton("1. 查看原始(清洗后)点云");
-    QPushButton* btnFilter = new QPushButton("2. 查看 Sor 滤波后点云");
-    QPushButton* btnBase = new QPushButton("3. 仅查看基准面(蓝色)点云");
-    viewLayout->addWidget(btnOrig); viewLayout->addWidget(btnFilter); viewLayout->addWidget(btnBase);
+    QPushButton* btnOrig = new QPushButton("1. 查看清洗点云");
+    QPushButton* btnFilter = new QPushButton("2. 查看Sor滤波后点云");
+    QPushButton* btnBase = new QPushButton("3. 仅查看基准面点云");
+    QPushButton* btuCenter = new QPushButton("4. 查看拟合圆点云图");
+    viewLayout->addWidget(btnOrig);
+    viewLayout->addWidget(btnFilter);
+    viewLayout->addWidget(btnBase);
+    viewLayout->addWidget(btuCenter);
     vLayout->addWidget(viewGroup);
     vLayout->addStretch(); // 弹簧把设置项顶在上方
 
@@ -288,6 +292,13 @@ void MainWindow::setupUi()
     connect(btnOrig, &QPushButton::clicked, this, [this](){ launchPclViewer(QCoreApplication::applicationDirPath() + "/temp_clean.pcd", "2"); });
     connect(btnFilter, &QPushButton::clicked, this, [this](){ launchPclViewer(QCoreApplication::applicationDirPath() + "/temp_filtered.pcd", "2"); });
     connect(btnBase, &QPushButton::clicked, this, [this](){ launchPclViewer(QCoreApplication::applicationDirPath() + "/temp_base.pcd", "3"); });
+    connect(btuCenter, &QPushButton::clicked, this, [this](){
+        QStringList finalFiles;
+        finalFiles << QCoreApplication::applicationDirPath() + "/temp_base.pcd"
+                   << QCoreApplication::applicationDirPath() + "/temp_features.pcd"
+                   << QCoreApplication::applicationDirPath() + "/temp_centers.pcd";
+        launchPclViewer(finalFiles, "3");
+    });
 
     // ==========================================
     // 3. 设置初始比例：左侧占 3份，右侧占 1份
@@ -1589,9 +1600,8 @@ void MainWindow::onViewPointCloudTriggered()
     viewerProcess->setWorkingDirectory(QCoreApplication::applicationDirPath());
 
     // 强制屏蔽外部程序的烦人日志，还 Qt 控制台一个清净
-    QString logPath = QCoreApplication::applicationDirPath() + "/pcl_viewer_silent.log";
-    viewerProcess->setStandardOutputFile(logPath);
-    viewerProcess->setStandardErrorFile(logPath);
+    viewerProcess->setStandardOutputFile(QProcess::nullDevice());
+    viewerProcess->setStandardErrorFile(QProcess::nullDevice());
 
     qint64 pid;
     bool success = viewerProcess->startDetached(&pid);
@@ -1605,23 +1615,30 @@ void MainWindow::onViewPointCloudTriggered()
 }
 
 void MainWindow::launchPclViewer(const QString& pcdPath, const QString& pointSize) {
-    if (!QFile::exists(pcdPath)) {
-        QMessageBox::warning(this, "文件不存在", "未找到对应的过程文件，请先执行一次 3D 分析！");
-        return;
-    }
+    launchPclViewer(QStringList() << pcdPath, pointSize);
+}
+
+void MainWindow::launchPclViewer(const QStringList& pcdPaths, const QString& pointSize) {
     QStringList args;
-    args << pcdPath << "-ps" << pointSize << "-bg" << "0.15,0.15,0.15";
+    for (const QString& path : pcdPaths) {
+        if (!QFile::exists(path)) {
+            QMessageBox::warning(this, "文件不存在", "未找到对应的过程文件：\n" + path + "\n请先执行一次 3D 分析！");
+            return;
+        }
+        args << path;
+    }
+
+    args << "-ps" << pointSize << "-bg" << "0.15,0.15,0.15";
 
     QProcess* viewerProcess = new QProcess(this);
     viewerProcess->setProgram("pcl_viewer.exe");
     viewerProcess->setArguments(args);
+    viewerProcess->setWorkingDirectory(QCoreApplication::applicationDirPath());
 
-    // 将标准输出和标准错误全部重定向到“空设备”（彻底屏蔽日志）
     QString logPath = QCoreApplication::applicationDirPath() + "/pcl_viewer_silent.log";
     viewerProcess->setStandardOutputFile(logPath);
     viewerProcess->setStandardErrorFile(logPath);
 
-    // 开启分离模式，保证关闭主界面时它不崩溃
     viewerProcess->startDetached();
     viewerProcess->deleteLater(); // 启动后安全释放自身内存
 }
