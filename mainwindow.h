@@ -93,6 +93,9 @@ private:
 
     void loadWeldingProcesses();                        // 从 JSON文件加载焊接工艺
 
+    QStackedWidget* m_mainStackedWidget;
+    QWidget* m_main3DWidget;
+
     QVector<Hole> allHoles;                             // 所有圆（含主体圆+焊接管孔）
     QVector<Hole> weldHoles;                            // 仅焊接管孔（不含主体圆）
     Hole mainPlateHole;                                 // 管板主体圆（最大半径)
