@@ -101,7 +101,7 @@ bool PointCloudProcessor::extractTubeSheetSurface(pcl::PointCloud<pcl::PointXYZR
                 largest_base_cluster->height = 1;
                 largest_base_cluster->is_dense = true;
 
-                // 狸猫换太子：用净化的点云覆盖掉原来的点云
+                // 用净化的点云覆盖掉原来的点云
                 *baseSurfaceCloud = *largest_base_cluster;
                 qDebug() << "   -> [净化] 已通过连通域分析剔除游离噪点，锁定纯净管板本体，剩余点数：" << baseSurfaceCloud->points.size();
             }
@@ -164,51 +164,73 @@ bool PointCloudProcessor::extractTubeSheetSurface(pcl::PointCloud<pcl::PointXYZR
             // ==========================================
             // 6. 3D 空间圆精准拟合
             // ==========================================
+            // ==========================================
+            // 6. 3D 空间圆精准拟合 (大厂级：离散模板竞争法)
+            // ==========================================
             for (const auto& indices : cluster_indices) {
                 pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud_cluster(new pcl::PointCloud<pcl::PointXYZRGBA>);
                 for (const auto& idx : indices.indices) cloud_cluster->points.push_back(featureCloud->points[idx]);
 
-                pcl::SACSegmentation<pcl::PointXYZRGBA> *circle_seg = new pcl::SACSegmentation<pcl::PointXYZRGBA>();
-                pcl::PointIndices::Ptr circle_inliers(new pcl::PointIndices);
-                pcl::ModelCoefficients::Ptr circle_coeff(new pcl::ModelCoefficients);
+                // 核心杀招：建立物理先验模板库 (图纸上的理论半径)
+                // 绝不给 RANSAC 宽泛的瞎猜空间，强迫它只找这两种尺寸！
+                // (未来这里可以改为动态读取你的 DXF 理论孔径数组)
+                std::vector<double> theoretical_radii = {7.5, 12.5};
 
-                circle_seg->setOptimizeCoefficients(true);
-                circle_seg->setModelType(pcl::SACMODEL_CIRCLE3D);
-                circle_seg->setMethodType(pcl::SAC_RANSAC);
-                circle_seg->setMaxIterations(2000);
-                circle_seg->setDistanceThreshold(params.circleDistanceThresh);
-                // 限制物理半径：放宽一点允许范围 6.0 ~ 14.0
-                circle_seg->setRadiusLimits(6.0, 14.0);
-                circle_seg->setInputCloud(cloud_cluster);
-                circle_seg->segment(*circle_inliers, *circle_coeff);
-                delete circle_seg;
+                HoleFeature best_hole;
+                int max_inliers = 0;
+                pcl::PointIndices::Ptr best_inliers(new pcl::PointIndices);
 
-                if (!circle_inliers->indices.empty() && circle_coeff->values.size() >= 4) {
-                    HoleFeature h;
-                    h.x = circle_coeff->values[0];
-                    h.y = circle_coeff->values[1];
-                    h.z = circle_coeff->values[2];
-                    h.radius = circle_coeff->values[3];
+                // 让不同的理论半径去“竞争”这个点云簇，看谁拟合出的内点最多
+                for (double target_r : theoretical_radii) {
+                    pcl::SACSegmentation<pcl::PointXYZRGBA> circle_seg;
+                    pcl::PointIndices::Ptr circle_inliers(new pcl::PointIndices);
+                    pcl::ModelCoefficients::Ptr circle_coeff(new pcl::ModelCoefficients);
 
+                    circle_seg.setOptimizeCoefficients(true);
+                    circle_seg.setModelType(pcl::SACMODEL_CIRCLE3D);
+                    circle_seg.setMethodType(pcl::SAC_RANSAC);
+                    circle_seg.setMaxIterations(2000);
+                    circle_seg.setDistanceThreshold(params.circleDistanceThresh);
+
+                    // 极度严苛的公差锁定：只允许在理论尺寸上下 1.0mm 内浮动！
+                    circle_seg.setRadiusLimits(target_r - 1.0, target_r + 1.0);
+                    circle_seg.setInputCloud(cloud_cluster);
+                    circle_seg.segment(*circle_inliers, *circle_coeff);
+
+                    // 如果当前模板拟合成功，且包含的真实边缘点比上一个模板多，则替换为最优解
+                    if (!circle_inliers->indices.empty() && circle_inliers->indices.size() > max_inliers) {
+                        max_inliers = circle_inliers->indices.size();
+                        best_hole.x = circle_coeff->values[0];
+                        best_hole.y = circle_coeff->values[1];
+                        best_hole.z = circle_coeff->values[2];
+                        best_hole.radius = circle_coeff->values[3];
+                        *best_inliers = *circle_inliers;
+                    }
+                }
+
+                // 如果经过激烈的竞争，成功找到了最优模板圆
+                if (max_inliers > 0) {
                     // 核心算法升级：象限覆盖率检验 (过滤外边缘倒角伪影)
                     int quadrants[4] = {0, 0, 0, 0};
-                    for (const auto& idx : circle_inliers->indices) {
+                    for (const auto& idx : best_inliers->indices) {
                         const auto& pt = cloud_cluster->points[idx];
-                        float dx = pt.x - h.x;
-                        float dy = pt.y - h.y;
+                        float dx = pt.x - best_hole.x;
+                        float dy = pt.y - best_hole.y;
                         if (dx >= 0 && dy >= 0) quadrants[0]++;
                         else if (dx < 0 && dy >= 0) quadrants[1]++;
                         else if (dx < 0 && dy < 0) quadrants[2]++;
                         else if (dx >= 0 && dy < 0) quadrants[3]++;
                     }
+
                     // 统计有多少个象限包含超过 5 个点
                     int filledQuadrants = (quadrants[0]>5) + (quadrants[1]>5) + (quadrants[2]>5) + (quadrants[3]>5);
 
-                    // 终极裁决：必须是闭合的圆（占满至少 3个象限），且半径合法
-                    if (filledQuadrants >= 3 && h.radius >= 6.0 && h.radius <= 14.0) {
-                        detectedHoles.push_back(h);
+                    // 终极裁决：必须是闭合的圆（占满至少 3 个象限）
+                    // 注意：这里不需要再判断 h.radius 范围了，因为它已经被死死锁在模板的 ±1.0mm 内了
+                    if (filledQuadrants >= 3) {
+                        detectedHoles.push_back(best_hole);
                     } else {
-                        qDebug() << "   -> 剔除无效伪圆特征：算得半径" << h.radius << "mm, 闭合象限数仅为" << filledQuadrants;
+                        qDebug() << "   -> 剔除残缺伪圆：算得半径" << best_hole.radius << "mm, 闭合象限数仅为" << filledQuadrants;
                     }
                 }
             }
