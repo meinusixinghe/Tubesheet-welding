@@ -1,7 +1,7 @@
 #ifndef USERCOORDINATEMANAGER_H
 #define USERCOORDINATEMANAGER_H
 
-#include "mainwindow.h"
+#include "drawingdata.h"
 #include <QObject>
 #include <QMatrix4x4>
 #include <QVector>

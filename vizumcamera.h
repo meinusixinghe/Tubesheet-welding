@@ -7,6 +7,8 @@
 #include <QObject>
 #include "VZNL_Common.h"
 
+namespace OfficialShapeDetection { enum class Type; }
+
 class VizumCamera : public QObject
 {
     Q_OBJECT
@@ -34,6 +36,8 @@ private:
     QAction *m_openDeviceAction = nullptr;
     QAction *m_captureAction = nullptr;
     QAction *m_closeDeviceAction = nullptr;
+    QAction *m_circleDetectAction = nullptr;
+    QAction *m_cylinderDetectAction = nullptr;
     SVzVideoResolution m_sRGBVideoRes;
     SVzNLPointXYZRGBA* m_p2DToPointMap = nullptr;
     bool* m_pb2DInvalidPt = nullptr;
@@ -41,6 +45,8 @@ private:
     static void _AutoOutputLaserLineExCB(EVzResultDataType eDataType, SVzLaserLineData* pLaserLinePoint, void* pParam);
 
     void initActions(); // 内部初始化动作、绑定信号槽
+    void updateDetectionActions();
+    void openOfficialDetection(OfficialShapeDetection::Type type);
 
     QString m_saveDirectory;
 };

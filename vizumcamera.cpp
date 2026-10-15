@@ -1,4 +1,5 @@
 #include "vizumcamera.h"
+#include "officialshapedialog.h"
 #include "VZNL_Graphics.h"
 #include "VZNL_DetectLaser.h"
 #include "VZNL_DetectConfig.h"
@@ -42,13 +43,22 @@ void VizumCamera::initActions()
     m_openDeviceAction=new QAction("打开设备",this);
     m_captureAction=new QAction("开启采图",this);
     m_closeDeviceAction=new QAction("关闭设备",this);
+    m_circleDetectAction = new QAction("官方圆孔检测", this);
+    m_cylinderDetectAction = new QAction("官方圆柱检测", this);
 
     m_captureAction->setEnabled(false);
     m_closeDeviceAction->setEnabled(false);
+    updateDetectionActions();
 
     connect(m_openDeviceAction,&QAction::triggered,this,&VizumCamera::onOpenDeviceTriggered);
     connect(m_captureAction,&QAction::triggered,this,&VizumCamera::onCaptureTriggered);
     connect(m_closeDeviceAction,&QAction::triggered,this,&VizumCamera::onCloseDeviceTriggered);
+    connect(m_circleDetectAction, &QAction::triggered, this, [this]() {
+        openOfficialDetection(OfficialShapeDetection::Type::Circle);
+    });
+    connect(m_cylinderDetectAction, &QAction::triggered, this, [this]() {
+        openOfficialDetection(OfficialShapeDetection::Type::Cylinder);
+    });
 }
 
 void VizumCamera::addActionsToToolBar(QToolBar *toolbar)
@@ -56,6 +66,26 @@ void VizumCamera::addActionsToToolBar(QToolBar *toolbar)
     toolbar->addAction(m_openDeviceAction);
     toolbar->addAction(m_captureAction);
     toolbar->addAction(m_closeDeviceAction);
+    toolbar->addSeparator();
+    toolbar->addAction(m_circleDetectAction);
+    toolbar->addAction(m_cylinderDetectAction);
+}
+
+void VizumCamera::updateDetectionActions()
+{
+    const bool enabled = m_mainCameraHandle != nullptr && !m_isCapturing;
+    m_circleDetectAction->setEnabled(enabled);
+    m_cylinderDetectAction->setEnabled(enabled);
+}
+
+void VizumCamera::openOfficialDetection(OfficialShapeDetection::Type type)
+{
+    if (!m_mainCameraHandle || m_isCapturing) {
+        emit errorOccurred("请先打开相机，并在停止扫描后执行官方检测。");
+        return;
+    }
+    OfficialShapeDialog dialog(m_mainCameraHandle, type, m_saveDirectory, qobject_cast<QWidget*>(parent()));
+    dialog.exec();
 }
 
 void VizumCamera::onCaptureTriggered()
@@ -162,6 +192,7 @@ void VizumCamera::onCaptureTriggered()
 
         if (nErr == 0) {
             m_isCapturing = true;
+            updateDetectionActions();
             m_captureAction->setText("停止扫描并保存图像");
             qDebug() << "▶ 激光扫描已启动，请等待扫描完成后点击停止...";
         } else {
@@ -222,7 +253,7 @@ void VizumCamera::onCaptureTriggered()
             delete[] depthImageData.pBuffer;
 
             // ==========================================
-            // 🌟 新增的 5️⃣：将数据转换为 PCL 点云并保存为 .pcd
+            // 将数据转换为 PCL 点云并保存为 .pcd
             // ==========================================
             pcl::PointCloud<pcl::PointXYZRGBA>::Ptr pclCloud(new pcl::PointCloud<pcl::PointXYZRGBA>());
             int nPclReadPos = 0;
@@ -276,12 +307,13 @@ void VizumCamera::onCaptureTriggered()
             VzNL_ReleaseImage(&psCenterImage);
         }
 
-        // 🧹 清理堆区内存，防止内存泄漏
+        // 清理堆区内存，防止内存泄漏
         if (m_p2DToPointMap) { delete[] m_p2DToPointMap; m_p2DToPointMap = nullptr; }
         if (m_pb2DInvalidPt) { delete[] m_pb2DInvalidPt; m_pb2DInvalidPt = nullptr; }
 
         VzNL_EndDetectLaser(m_mainCameraHandle);
-        qDebug() << "⏹ 激光扫描已安全结束，本次共保存 5 种图像/点云数据。";
+        updateDetectionActions();
+        qDebug() << "激光扫描已安全结束，本次共保存 5 种图像/点云数据。";
     }
 }
 
@@ -336,13 +368,14 @@ void VizumCamera::onOpenDeviceTriggered()
                 m_captureAction->setEnabled(true);
                 m_closeDeviceAction->setEnabled(true);
                 m_openDeviceAction->setEnabled(false);
+                updateDetectionActions();
 
                 VzNL_EnableRGB(m_mainCameraHandle, VzTrue);
                 if (VzNL_IsSupportSwingMotor(m_mainCameraHandle, nullptr)) {
                     VzNL_EnableSwingMotor(m_mainCameraHandle, VzTrue);
                 }
 
-                // 🌟 修复点：抛出设备成功连接的信号，携带 IP 地址
+                // 抛出设备成功连接的信号，携带 IP 地址
                 emit deviceOpened(QString((char*)devInfo.byServerIP));
                 return;
             }
@@ -356,7 +389,7 @@ void VizumCamera::onCloseDeviceTriggered()
     if (m_mainCameraHandle != nullptr) {
         // 如果还在采图，先安全停止
         if (m_isCapturing) {
-            onCaptureTriggered(); // 🌟 直接复用采图逻辑，保证内存和硬件被正确释放
+            onCaptureTriggered(); // 直接复用采图逻辑，保证内存和硬件被正确释放
         }
 
         VzNL_CloseDevice(m_mainCameraHandle);
@@ -366,6 +399,7 @@ void VizumCamera::onCloseDeviceTriggered()
         m_captureAction->setEnabled(false);
         m_closeDeviceAction->setEnabled(false);
         m_openDeviceAction->setEnabled(true);
+        updateDetectionActions();
 
         // 释放整个 SDK 环境
         VzNL_Destroy();

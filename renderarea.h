@@ -6,11 +6,9 @@
 #include <QPainter>
 #include <QWheelEvent>
 #include <QMouseEvent>
-#include "mainwindow.h"
+#include "drawingdata.h"
+#include <QPolygonF>
 #include <QSet>
-
-struct Hole;
-struct Contour;
 
 class RenderArea : public QWidget
 {

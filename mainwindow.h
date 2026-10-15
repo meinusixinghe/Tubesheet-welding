@@ -18,12 +18,10 @@
 #include <QDoubleSpinBox>
 #include <QSpinBox>
 #include <QStackedWidget>
+#include "drawingdata.h"
 
 class RenderArea;
 class usercoordinatemanager;
-
-struct Hole { int id; QPointF center; QVector3D center3D; double radius; };     // 管孔的唯一编号、管孔的二维坐标（二维点类，浮点型）、管孔的三维坐标（三维点类，浮点型）、管孔的半径
-struct Contour { QVector<QPointF> points; };                                    // 多段线（目前未启用）
 
 class MainWindow : public QMainWindow
 {

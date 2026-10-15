@@ -12,7 +12,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent)
     : QDialog(parent), m_action(1)
 {
     setWindowTitle("工业控制设备通信连接");
-    setMinimumSize(480, 380);
+    setMinimumWidth(340);
 
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
 
@@ -49,6 +49,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent)
     connect(connectBtn, &QPushButton::clicked, this, &ConnectionDialog::onConnectRobotClicked);
     connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
 
+    adjustSize();
 }
 
 ConnectionDialog::~ConnectionDialog()

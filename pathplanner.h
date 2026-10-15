@@ -1,7 +1,7 @@
 #ifndef PATHPLANNER_H
 #define PATHPLANNER_H
 
-#include "mainwindow.h"
+#include "drawingdata.h"
 #include <QVector>
 #include <QObject>
 
